@@ -75,7 +75,9 @@ public class MPFloat : Comparable {
     }
 
     /// Convert value to String
+    /*
     public func toString(digits: Int = 32) -> String {
+        
         let capacity = digits + 32
         var buffer = [Int8](repeating: 0, count: capacity)
         
@@ -85,6 +87,64 @@ public class MPFloat : Comparable {
         return buffer.firstIndex(of: 0).map {
             String(decoding: buffer[..<$0].map { UInt8(bitPattern: $0) }, as: UTF8.self)
         } ?? ""
+        
+        // Wir berechnen die Puffergröße: Vorzeichen + Ziffern + Punkt + Exponent + Sicherheitsmarge
+        let capacity = digits + 32
+        var buffer = [Int8](repeating: 0, count: capacity)
+        
+        // Format-String erstellen, z.B. "%.32Rg"
+        let format = "%.\(digits)Rg"
+        
+        mpfr_snprintf(&buffer, capacity, format, &self.value)
+        
+        return String(cString: buffer)
+    }
+    */
+    public func toString(digits: Int = 32) -> String {
+        var exp: mpfr_exp_t = 0
+        // MPFR liefert die Ziffern (ohne Punkt) und den Exponenten separat
+        guard let cStr = mpfr_get_str(nil, &exp, 10, digits, &self.value, MPFR_RNDN) else {
+            return "NaN"
+        }
+        
+        var rawDigits = String(cString: cStr)
+        mpfr_free_str(cStr)
+        
+        if rawDigits.isEmpty || rawDigits == "0" { return "0" }
+        
+        // Vorzeichen extrahieren
+        let isNegative = rawDigits.hasPrefix("-")
+        if isNegative { rawDigits.removeFirst() }
+        
+        var result = isNegative ? "-" : ""
+        
+        // Fallunterscheidung basierend auf dem Exponenten
+        if exp > 0 && exp <= rawDigits.count {
+            // Fall 1: Punkt liegt innerhalb der Ziffern (z.B. 123.45)
+            let dotIndex = Int(exp)
+            result += rawDigits.prefix(dotIndex)
+            let suffix = rawDigits.dropFirst(dotIndex)
+            if !suffix.isEmpty {
+                result += "." + suffix
+            }
+        } else if exp > 0 {
+            // Fall 2: Zahl ist größer als die Ziffernanzahl (z.B. 1234500)
+            result += rawDigits
+            result += String(repeating: "0", count: Int(exp) - rawDigits.count)
+        } else {
+            // Fall 3: Sehr kleine Zahl (z.B. 0.000123)
+            result += "0."
+            result += String(repeating: "0", count: abs(Int(exp)))
+            result += rawDigits
+        }
+        
+        // Trimmen von unnötigen Nullen am Ende (optional)
+        if result.contains(".") {
+            while result.last == "0" { result.removeLast() }
+            if result.last == "." { result.removeLast() }
+        }
+        
+        return result
     }
     
     //

@@ -1,10 +1,8 @@
 module CMPFR [system] {
-    // Nutze die stabilen Aliase von Homebrew
-    //header "/opt/homebrew/opt/gmp/include/gmp.h"
-    //header "/opt/homebrew/opt/mpfr/include/mpfr.h"
-    header "../../include/shim.h"
-    header "../../include/gmp.h"
-    header "../../include/mpfr.h"
+    header "/opt/homebrew/include/gmp.h"
+    header "/opt/homebrew/include/mpfr.h"
+    //header "../../include/gmp.h"
+    //header "../../include/mpfr.h"
 
     link "gmp"
     link "mpfr"

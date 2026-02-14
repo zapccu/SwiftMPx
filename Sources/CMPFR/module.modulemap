@@ -1,0 +1,14 @@
+module CMPFR [system] {
+    module gmp {
+        header "/opt/homebrew/opt/gmp/include/gmp.h"
+        export *
+    }
+    module mpfr {
+        header "/opt/homebrew/opt/mpfr/include/mpfr.h"
+        export *
+    }
+    export *
+    link "mpfr"
+    link "gmp"
+}
+

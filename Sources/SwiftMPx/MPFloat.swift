@@ -63,6 +63,11 @@ public class MPFloat : Comparable {
     public func set(_ string: String) {
         mpfr_set_str(&self.value, string, 10, MPFR_RNDN)
     }
+    
+    /// Set value to Double
+    public func set(_ dval: Double) {
+        mpfr_set_d(&self.value, dval, MPFR_RNDN)
+    }
         
     /// Set value to value of MPFloat (deep copy)
     public func set(from other: MPFloat) {
@@ -70,36 +75,11 @@ public class MPFloat : Comparable {
     }
     
     /// Convert value to Double
-    func toDouble() -> Double {
+    public func toDouble() -> Double {
         return mpfr_get_d(&self.value, MPFR_RNDN)
     }
 
     /// Convert value to String
-    /*
-    public func toString(digits: Int = 32) -> String {
-        
-        let capacity = digits + 32
-        var buffer = [Int8](repeating: 0, count: capacity)
-        
-        // Jetzt akzeptiert Swift 'self.value' oft direkt oder mit einem einfachen Cast
-        mpfr_helper_format(&buffer, capacity, Int32(digits), &self.value)
-        
-        return buffer.firstIndex(of: 0).map {
-            String(decoding: buffer[..<$0].map { UInt8(bitPattern: $0) }, as: UTF8.self)
-        } ?? ""
-        
-        // Wir berechnen die Puffergröße: Vorzeichen + Ziffern + Punkt + Exponent + Sicherheitsmarge
-        let capacity = digits + 32
-        var buffer = [Int8](repeating: 0, count: capacity)
-        
-        // Format-String erstellen, z.B. "%.32Rg"
-        let format = "%.\(digits)Rg"
-        
-        mpfr_snprintf(&buffer, capacity, format, &self.value)
-        
-        return String(cString: buffer)
-    }
-    */
     public func toString(digits: Int = 32) -> String {
         var exp: mpfr_exp_t = 0
         // MPFR liefert die Ziffern (ohne Punkt) und den Exponenten separat
@@ -158,7 +138,7 @@ public class MPFloat : Comparable {
         return result
     }
     
-    /// Addition (inplace)
+    /// Addition (in place)
     static func += (lhs: inout MPFloat, rhs: MPFloat) {
         mpfr_add(&lhs.value, &lhs.value, &rhs.value, MPFR_RNDN)
     }
@@ -174,7 +154,7 @@ public class MPFloat : Comparable {
         return result
     }
     
-    /// Subtraction (inplace)
+    /// Subtraction (in place)
     public static func -= (lhs: inout MPFloat, rhs: MPFloat) {
         mpfr_sub(&lhs.value, &lhs.value, &rhs.value, MPFR_RNDN)
     }

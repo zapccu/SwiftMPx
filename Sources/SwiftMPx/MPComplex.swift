@@ -5,7 +5,13 @@
 //  Created by Dirk Braner on 14.02.26.
 //
 
-class MPComplex {
+#if canImport(Numerics)
+import Numerics
+#endif
+
+import CMPFR
+
+public class MPComplex {
     var real: mpfr_t
     var imaginary: mpfr_t
     
@@ -20,16 +26,16 @@ class MPComplex {
         mpfr_init2(&imaginary, mpfr_prec_t(prec))
     }
     
-    public init(_ real: Double = 0.0, _ imaginary: Double = 0.0, precision: Int32 = 128) {
+    public init(_ real: Double, _ imaginary: Double = 0.0, precision: Int32 = 128) {
         self.precision = precision
 
         self.real = mpfr_t()
         mpfr_init2(&self.real, mpfr_prec_t(precision))
-        mpfr_set_d(&self.real, dval, MPFR_RNDN)
+        mpfr_set_d(&self.real, real, MPFR_RNDN)
 
         self.imaginary = mpfr_t()
         mpfr_init2(&self.imaginary, mpfr_prec_t(precision))
-        mpfr_set_d(&self.imaginary, dval, MPFR_RNDN)
+        mpfr_set_d(&self.imaginary, imaginary, MPFR_RNDN)
     }
     
     public init(_ real: String = "0", _ imaginary: String = "0", precision: Int32 = 128) {
@@ -93,7 +99,7 @@ class MPComplex {
     
     /// Convert value to Complex<Double>
     func toComplex() -> Complex<Double> {
-        return Complex<Double>(mpfr_get_d(&self.real, MPFR_RNDN), mpfr_get_d(&self.imaginary, MPFR_RNDN)
+        return Complex<Double>(mpfr_get_d(&self.real, MPFR_RNDN), mpfr_get_d(&self.imaginary, MPFR_RNDN))
     }
     
     #endif
@@ -101,4 +107,13 @@ class MPComplex {
     //
     // Addition
     //
+    
+    //
+    // Comparision
+    //
+    
+    public static func == (lhs: MPComplex, rhs: MPComplex) -> Bool {
+        return mpfr_cmp(&lhs.real, &rhs.real) == 0 && mpfr_cmp(&lhs.imaginary, &rhs.imaginary) == 0
+    }
+
 }

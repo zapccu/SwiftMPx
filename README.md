@@ -12,3 +12,4 @@ How to use this package in your own Swift project:
 * Add "/opt/homebrew/lib" as library search path in build settings
 * Add "/opt/homebrew/include" as include search path in build settings
  
+

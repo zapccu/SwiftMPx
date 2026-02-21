@@ -3,9 +3,11 @@
 
 ## Initializers
 
+```
 MPFloat()
 MPFloat(Double, precision: Int32 = 128)
 MPFloat(String, precision: Int32 = 128)
+```
 
 ## Overloaded operators
 
@@ -54,6 +56,9 @@ MPFloat <- MPFloat
 
 ## Functions
 
+```
 .square() - Square 
 .sqrt() - Square root 
 .log() - Natural logarithm 
+```
+

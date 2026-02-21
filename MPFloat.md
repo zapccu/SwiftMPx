@@ -29,11 +29,11 @@ MPFloat -= Double
 
 ### Multiplication
 ```
-MPFloat \* MPFloat
-MPFloat \* Double
-Double \* MPFloat
-MPFloat \*= MPFloat
-MPFloat \*= Double
+MPFloat * MPFloat
+MPFloat * Double
+Double * MPFloat
+MPFloat *= MPFloat
+MPFloat *= Double
 ```
 
 ### Division
@@ -47,10 +47,13 @@ MPFloat /= Double
 
 ## Special operator
 
-MPFloat \<\- MPFloat - Copy MPFloat value
+Copy MPFloat value
+```
+MPFloat <- MPFloat
+```
 
 ## Functions
 
-.square() - Square
-.sqrt() - Square root
-.log() - Natural logarithm
+.square() - Square 
+.sqrt() - Square root 
+.log() - Natural logarithm 

@@ -11,109 +11,123 @@ import CMPFR
 // Floating point type with variable precision
 //
 
-infix operator <- : AssignmentPrecedence
+public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, Comparable, CustomStringConvertible, Sendable {
 
-public class MPFloat : Comparable, CustomStringConvertible {
-
-    // The value
-    public var value: mpfr_t
+    //
+    // Internal storage
+    //
     
-    // Temporary value, prevent memory allocation
-    public var tmp: mpfr_t
-
-    // Precision (default is 128 bit)
-    public let precision: Int32
-
-    init(prec: Int32 = 128) {
-        precision = prec
-        value = mpfr_t()
-        mpfr_init2(&value, mpfr_prec_t(prec))
-        tmp = mpfr_t()
-        mpfr_init2(&tmp, mpfr_prec_t(prec))
+    internal final class Storage: @unchecked Sendable {
+        var value: mpfr_t
+        
+        init(precision: Int) {
+            value = mpfr_t()
+            mpfr_init2(&value, precision)
+        }
+        
+        init(copying other: Storage) {
+            value = mpfr_t()
+            mpfr_init2(&value, mpfr_get_prec(&other.value))
+            mpfr_set(&value, &other.value, MPFR_RNDN)
+        }
+        
+        deinit {
+            mpfr_clear(&value)
+        }
     }
     
-    /// Initialize a value with a String
-    public init(_ string: String = "0", precision: Int32 = 128) {
-        self.precision = precision
-        
-        self.value = mpfr_t()
-        mpfr_init2(&self.value, mpfr_prec_t(precision))
-        tmp = mpfr_t()
-        mpfr_init2(&tmp, mpfr_prec_t(precision))
-        
-        // Store value
-        mpfr_set_str(&self.value, string, 10, MPFR_RNDN)
+    internal var storage: Storage
+    
+    //
+    // COW (Copy On Write) access
+    //
+    
+    /// Read access, never a copy
+    public var value: mpfr_t {
+        _read { yield storage.value }
     }
     
-    /// Initialize value with a Double
-    public init(_ dval: Double, precision: Int32 = 128) {
-        self.precision = precision
-        self.value = mpfr_t()
-        mpfr_init2(&self.value, mpfr_prec_t(precision))
-        
-        mpfr_set_d(&self.value, dval, MPFR_RNDN)
-        
-        tmp = mpfr_t()
-        mpfr_init2(&tmp, mpfr_prec_t(precision))
-    }
-
-    /// Free memory
-    deinit {
-        mpfr_clear(&self.value)
-        mpfr_clear(&self.tmp)
+    /// Write access – copy if necessary
+    internal var mutableValue: mpfr_t {
+        _read { yield storage.value }
+        mutating _modify {
+            if !isKnownUniquelyReferenced(&storage) {
+                storage = Storage(copying: storage)
+            }
+            yield &storage.value
+        }
     }
     
+    /// Return precision
+    public var precision: Int {
+        mpfr_get_prec(&storage.value)
+    }
+    
+    /// Return MPFloat value as String
     public var description: String {
         return self.toString()
     }
+
+    //
+    // Initializers
+    //
     
-    /// Return a copy of a value
-    /// Use y = x.copy() instead of y = x to create a new instance
-    func copy() -> MPFloat {
-        let newObj = MPFloat(prec: self.precision)
-        mpfr_set(&newObj.value, &self.value, MPFR_RNDN)
-        return newObj
+    /// Initialize empty value
+    public init(precision: Int = 128) {
+        storage = Storage(precision: precision)
     }
     
-    /// Set value to string
-    public func set(_ string: String) {
-        mpfr_set_str(&self.value, string, 10, MPFR_RNDN)
+    /// Initialize by assigning Double value
+    public init(floatLiteral value: Double) {
+        storage = Storage(precision: 64)
+        mpfr_set_d(&storage.value, value, MPFR_RNDN)
     }
     
-    /// Set value to string
-    public static func <- (lhs: MPFloat, _ rhs: String) {
-        mpfr_set_str(&lhs.value, rhs, 10, MPFR_RNDN)
+    /// Initialize by assigning Int value
+    public init(integerLiteral value: Int) {
+        storage = Storage(precision: 64)
+        mpfr_set_si(&storage.value, value, MPFR_RNDN)
+    }
+    
+    /// Initialize a value with a String
+    public init(_ sval: String, precision: Int = 128) {
+        storage = Storage(precision: precision)
+        mpfr_set_str(&mutableValue, sval, 10, MPFR_RNDN)
+    }
+    
+    /// Initialize value with a Double
+    public init(_ dval: Double, precision: Int = 128) {
+        storage = Storage(precision: precision)
+        mpfr_set_d(&mutableValue, dval, MPFR_RNDN)
+    }
+    
+    /// Initialize value with an Int
+    public init(_ ival: Int, precision: Int = 128) {
+        storage = Storage(precision: precision)
+        mpfr_set_d(&mutableValue, Double(ival), MPFR_RNDN)
+    }
+    
+    /// Initialize value with a MPFloat with precision conversion
+    public init(_ other: MPFloat, precision: Int) {
+        storage = Storage(precision: precision)
+        mpfr_set(&storage.value, &other.storage.value, MPFR_RNDN)
     }
 
-    /// Set value to Double
-    public func set(_ dval: Double) {
-        mpfr_set_d(&self.value, dval, MPFR_RNDN)
-    }
-    
-    /// Set value to Double
-    public static func <- (_ lhs: MPFloat, _ rhs: Double) {
-        mpfr_set_d(&lhs.value, rhs, MPFR_RNDN)
-    }
-    /// Set value to value of MPFloat (deep copy)
-    public func set(_ other: MPFloat) {
-        mpfr_set(&self.value, &other.value, MPFR_RNDN)
-    }
-    
-    /// Set value to value of MPFloat (deep copy)
-    public static func <- (lhs: MPFloat, rhs: MPFloat) {
-        mpfr_set(&lhs.value, &rhs.value, MPFR_RNDN)
-    }
+    //
+    // Conversion functions
+    //
     
     /// Convert value to Double
     public func toDouble() -> Double {
-        return mpfr_get_d(&self.value, MPFR_RNDN)
+        return mpfr_get_d(&self.storage.value, MPFR_RNDN)
     }
 
     /// Convert value to String
     public func toString(digits: Int = 32) -> String {
         var exp: mpfr_exp_t = 0
-        // MPFR liefert die Ziffern (ohne Punkt) und den Exponenten separat
-        guard let cStr = mpfr_get_str(nil, &exp, 10, digits, &self.value, MPFR_RNDN) else {
+        
+        // MPFR returns digits without decimal point and exponent separately
+        guard let cStr = mpfr_get_str(nil, &exp, 10, digits, &self.storage.value, MPFR_RNDN) else {
             return "NaN"
         }
         
@@ -122,15 +136,14 @@ public class MPFloat : Comparable, CustomStringConvertible {
         
         if rawDigits.isEmpty || rawDigits == "0" { return "0" }
         
-        // Vorzeichen extrahieren
+        // Extract sign
         let isNegative = rawDigits.hasPrefix("-")
         if isNegative { rawDigits.removeFirst() }
         
         var result = isNegative ? "-" : ""
         
-        // Fallunterscheidung basierend auf dem Exponenten
         if exp > 0 && exp <= rawDigits.count {
-            // Fall 1: Punkt liegt innerhalb der Ziffern (z.B. 123.45)
+            // Case 1: "123.45"
             let dotIndex = Int(exp)
             result += rawDigits.prefix(dotIndex)
             let suffix = rawDigits.dropFirst(dotIndex)
@@ -138,17 +151,17 @@ public class MPFloat : Comparable, CustomStringConvertible {
                 result += "." + suffix
             }
         } else if exp > 0 {
-            // Fall 2: Zahl ist größer als die Ziffernanzahl (z.B. 1234500)
+            // Case 2: "1234500"
             result += rawDigits
             result += String(repeating: "0", count: Int(exp) - rawDigits.count)
         } else {
-            // Fall 3: Sehr kleine Zahl (z.B. 0.000123)
+            // Case 3: Very small number "0.000123"
             result += "0."
             result += String(repeating: "0", count: abs(Int(exp)))
             result += rawDigits
         }
         
-        // Trimmen von unnötigen Nullen am Ende (optional)
+        // Trim zeroes
         if result.contains(".") {
             while result.last == "0" { result.removeLast() }
             if result.last == "." { result.removeLast() }
@@ -158,20 +171,30 @@ public class MPFloat : Comparable, CustomStringConvertible {
     }
     
     //
+    // Unary operations
+    //
+    
+    /// Negate MPFloat
+    public static prefix func - (rhs: MPFloat) -> MPFloat {
+        var result = rhs
+        mpfr_neg(&result.mutableValue, &result.storage.value, MPFR_RNDN)
+        return result
+    }
+    
+    //
     // Addition
     //
     
     /// Addition, return new value (additional memory needed)
     public static func + (_ lhs: MPFloat, _ rhs: MPFloat) -> MPFloat {
-        let result = MPFloat(precision: lhs.precision)
-        mpfr_add(&result.value, &lhs.value, &rhs.value, MPFR_RNDN)
+        var result = MPFloat(precision: lhs.precision)
+        mpfr_add(&result.storage.value, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
         return result
     }
     
     /// Addition (in place)
     public static func += (lhs: inout MPFloat, rhs: MPFloat) {
-        mpfr_add(&lhs.tmp, &lhs.value, &rhs.value, MPFR_RNDN)
-        mpfr_set(&lhs.value, &lhs.tmp, MPFR_RNDN)
+        mpfr_add(&lhs.mutableValue, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
     }
     
     //
@@ -180,15 +203,14 @@ public class MPFloat : Comparable, CustomStringConvertible {
     
     /// Subtraction, return new value (additional memory needed)
     public static func - (_ lhs: MPFloat, _ rhs: MPFloat) -> MPFloat {
-        let result = MPFloat(precision: lhs.precision)
-        mpfr_sub(&result.value, &lhs.value, &rhs.value, MPFR_RNDN)
+        var result = MPFloat(precision: lhs.precision)
+        mpfr_sub(&result.storage.value, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
         return result
     }
     
     /// Subtraction (in place)
     public static func -= (lhs: inout MPFloat, rhs: MPFloat) {
-        mpfr_sub(&lhs.tmp, &lhs.value, &rhs.value, MPFR_RNDN)
-        mpfr_set(&lhs.value, &lhs.tmp, MPFR_RNDN)
+        mpfr_sub(&lhs.mutableValue, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
     }
 
     //
@@ -197,35 +219,14 @@ public class MPFloat : Comparable, CustomStringConvertible {
     
     /// Multiplication: MPFloat with MPFloat
     public static func * (_ lhs: MPFloat, _ rhs: MPFloat) -> MPFloat {
-        let result = MPFloat(precision: lhs.precision)
-        mpfr_mul(&result.value, &lhs.value, &rhs.value, MPFR_RNDN)
+        var result = MPFloat(precision: lhs.precision)
+        mpfr_mul(&result.storage.value, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
         return result
-    }
-    
-    /// Multiplication: Double with MPFloat
-    public static func * (lhs: Double, rhs: MPFloat) -> MPFloat {
-        let res = MPFloat(prec: rhs.precision)
-        mpfr_mul_d(&res.value, &rhs.value, lhs, MPFR_RNDN)
-        return res
-    }
-    
-    /// Multiplication: MPFloat with Double
-    public static func * (lhs: MPFloat, rhs: Double) -> MPFloat {
-        let res = MPFloat(prec: lhs.precision)
-        mpfr_mul_d(&res.value, &lhs.value, rhs, MPFR_RNDN)
-        return res
     }
     
     /// Inplace multiplication with MPFloat
     public static func *= (_ lhs: inout MPFloat, _ rhs: MPFloat) {
-        mpfr_mul(&lhs.tmp, &lhs.value, &rhs.value, MPFR_RNDN)
-        mpfr_set(&lhs.value, &lhs.tmp, MPFR_RNDN)
-    }
-    
-    /// Inplace multiplication with Double
-    public static func *= (lhs: inout MPFloat, rhs: Double) {
-        mpfr_mul_d(&lhs.tmp, &lhs.value, rhs, MPFR_RNDN)
-        mpfr_set(&lhs.value, &lhs.tmp, MPFR_RNDN)
+        mpfr_mul(&lhs.mutableValue, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
     }
 
     //
@@ -234,35 +235,14 @@ public class MPFloat : Comparable, CustomStringConvertible {
     
     /// Divison: MPFloat by MPFloat
     public static func / (_ lhs: MPFloat, _ rhs: MPFloat) -> MPFloat {
-        let result = MPFloat(precision: lhs.precision)
-        mpfr_div(&result.value, &lhs.value, &rhs.value, MPFR_RNDN)
+        var result = MPFloat(precision: lhs.precision)
+        mpfr_div(&result.storage.value, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
         return result
-    }
-    
-    /// Division: Double by MPFloat
-    public static func / (lhs: Double, rhs: MPFloat) -> MPFloat {
-        let res = MPFloat(prec: rhs.precision)
-        mpfr_d_div(&res.value, lhs, &rhs.value, MPFR_RNDN)
-        return res
-    }
-    
-    /// Division: MPFloat by Double
-    public static func / (lhs: MPFloat, rhs: Double) -> MPFloat {
-        let res = MPFloat(prec: lhs.precision)
-        mpfr_div_d(&res.value, &lhs.value, rhs, MPFR_RNDN)
-        return res
     }
     
     /// Division: in-place by MPFloat
     public static func /= (_ lhs: inout MPFloat, _ rhs: MPFloat) {
-        mpfr_div(&lhs.tmp, &lhs.value, &rhs.value, MPFR_RNDN)
-        mpfr_set(&lhs.value, &lhs.tmp, MPFR_RNDN)
-    }
-    
-    /// Division: in-place by Double
-    public static func /= (lhs: inout MPFloat, rhs: Double) {
-        mpfr_div_d(&lhs.tmp, &lhs.value, rhs, MPFR_RNDN)
-        mpfr_set(&lhs.value, &lhs.tmp, MPFR_RNDN)
+        mpfr_div(&lhs.mutableValue, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
     }
     
     //
@@ -270,57 +250,150 @@ public class MPFloat : Comparable, CustomStringConvertible {
     //
     
     public static func == (lhs: MPFloat, rhs: MPFloat) -> Bool {
-        return mpfr_cmp(&lhs.value, &rhs.value) == 0
+        return mpfr_cmp(&lhs.storage.value, &rhs.storage.value) == 0
     }
 
+    public static func != (lhs: MPFloat, rhs: MPFloat) -> Bool {
+        return mpfr_cmp(&lhs.storage.value, &rhs.storage.value) != 0
+    }
+    
     public static func < (lhs: MPFloat, rhs: MPFloat) -> Bool {
-        return mpfr_cmp(&lhs.value, &rhs.value) < 0
+        return mpfr_cmp(&lhs.storage.value, &rhs.storage.value) < 0
     }
-
-    public static func < (lhs: MPFloat, rhs: Double) -> Bool {
-        return mpfr_cmp_d(&lhs.value, rhs) < 0
+    
+    public static func <= (lhs: MPFloat, rhs: MPFloat) -> Bool {
+        let r = mpfr_cmp(&lhs.storage.value, &rhs.storage.value)
+        return r <= 0
     }
 
     public static func > (lhs: MPFloat, rhs: MPFloat) -> Bool {
-        return mpfr_cmp(&lhs.value, &rhs.value) > 0
+        return mpfr_cmp(&lhs.storage.value, &rhs.storage.value) > 0
+    }
+    
+    public static func >= (lhs: MPFloat, rhs: MPFloat) -> Bool {
+        let r = mpfr_cmp(&lhs.storage.value, &rhs.storage.value)
+        return r >= 0
+    }
+    
+    //
+    // Constants
+    //
+
+    /// Return PI with specified precision
+    public static func PI(precision: Int = 128) -> MPFloat {
+        var result = MPFloat(precision: precision)
+        mpfr_const_pi(&result.storage.value, MPFR_RNDN)
+        return result
     }
 
-    public static func > (lhs: MPFloat, rhs: Double) -> Bool {
-        return mpfr_cmp_d(&lhs.value, rhs) > 0
-    }
-    
-    //
-    // Mathematic functions
-    //
-    
-    /// Square root, return new value
-    public func sqrt() -> MPFloat {
-        let res = MPFloat(prec: precision)
-        mpfr_sqrt(&res.value, &self.value, MPFR_RNDN)
-        return res
-    }
-    
-    /// Square, return new value
-    public func square() -> MPFloat {
-        let res = MPFloat(prec: precision)
-        mpfr_sqr(&res.value, &self.value, MPFR_RNDN)
-        return res
-    }
-    
-    /// Logarithm, return new value
-    public func log() -> MPFloat {
-        let res = MPFloat(prec: precision)
-        mpfr_log(&res.value, &self.value, MPFR_RNDN)
-        return res
+    /// Return ln(2) with specified precision
+    public static func LOG2(precision: Int = 128) -> MPFloat {
+        var result = MPFloat(precision: precision)
+        mpfr_const_log2(&result.storage.value, MPFR_RNDN)
+        return result
     }
 
 }
 
+//
+// Min/Max
+//
+
+/// Return maximum of two values
+/// - Parameters:
+///   - lhs: Value 1
+///   - rhs: Value 2
+/// - Returns: Maximum of lhs, rhs
+public func max(_ lhs: MPFloat, _ rhs: MPFloat) -> MPFloat {
+    if mpfr_cmp(&lhs.storage.value, &rhs.storage.value) > 0 {
+        var result = MPFloat(precision: lhs.precision)
+        mpfr_set(&result.storage.value, &lhs.storage.value, MPFR_RNDN)
+        return result
+    }
+    else {
+        var result = MPFloat(precision: rhs.precision)
+        mpfr_set(&result.storage.value, &rhs.storage.value, MPFR_RNDN)
+        return result
+    }
+}
+
+/// Return minimum of two values
+/// - Parameters:
+///   - lhs: Value 1
+///   - rhs: Value 2
+/// - Returns: Minimum of lhs, rhs
+public func min(_ lhs: MPFloat, _ rhs: MPFloat) -> MPFloat {
+    if mpfr_cmp(&lhs.storage.value, &rhs.storage.value) < 0 {
+        var result = MPFloat(precision: lhs.precision)
+        mpfr_set(&result.storage.value, &lhs.storage.value, MPFR_RNDN)
+        return result
+    }
+    else {
+        var result = MPFloat(precision: rhs.precision)
+        mpfr_set(&result.storage.value, &rhs.storage.value, MPFR_RNDN)
+        return result
+    }
+}
+
+//
+// Mathematic functions
+//
+
+public func fmod(_ x: MPFloat, _ y: MPFloat) -> MPFloat {
+    var result = MPFloat(precision: x.precision)
+    mpfr_fmod(&result.storage.value, &x.storage.value, &y.storage.value, MPFR_RNDN)
+    return result
+}
+
+/// Square root, return new value
+public func sqrt(_ x: MPFloat) -> MPFloat {
+    var result = MPFloat(precision: x.precision)
+    mpfr_sqrt(&result.storage.value, &x.storage.value, MPFR_RNDN)
+    return result
+}
+
+/// Square, return new value
+public func square(_ x: MPFloat) -> MPFloat {
+    var result = MPFloat(precision: x.precision)
+    mpfr_sqr(&result.storage.value, &x.storage.value, MPFR_RNDN)
+    return result
+}
+
+/// Power
+public func pow(_ x: MPFloat, _ y: MPFloat) -> MPFloat {
+    var result = MPFloat(precision: x.precision)
+    mpfr_pow(&result.storage.value, &x.storage.value, &y.storage.value, MPFR_RNDN)
+    return result
+}
+
+/// Logarithm, return new value
+public func log(_ x: MPFloat) -> MPFloat {
+    var result = MPFloat(precision: x.precision)
+    mpfr_log(&result.storage.value, &x.storage.value, MPFR_RNDN)
+    return result
+}
+
+/// Logarithm with base 2
+public func log2(_ x: MPFloat) -> MPFloat {
+    var result = MPFloat(precision: x.precision)
+    mpfr_log2(&result.storage.value, &x.storage.value, MPFR_RNDN)
+    return result
+}
+
+/// Exponential function
+public func exp(_ x: MPFloat) -> MPFloat {
+    var result = MPFloat(precision: x.precision)
+    mpfr_exp(&result.storage.value, &x.storage.value, MPFR_RNDN)
+    return result
+}
+
 extension Double {
+    
     /// Convert MPFloat to Double
     init(_ mpf: MPFloat) {
         self = mpf.toDouble()
     }
+    
 }
 
 

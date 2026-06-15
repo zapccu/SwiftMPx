@@ -5,34 +5,93 @@
 //  Created by Dirk Braner on 14.02.26.
 //
 
+import Foundation
 import CMPFR
 
 
 public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, CustomStringConvertible, Sendable {
     
+    // Real und imaginary parts
     public var real: MPFloat
     public var imaginary: MPFloat
     
     // Precision (default is 128 bit)
     public let precision: Int
     
-    /// Initialize MPComplex
-    init(precision: Int = 128) {
+    /// Calculate required precision
+    ///
+    /// - Parameters:
+    ///   - real:        Base value for precision estimation. Decimal string (i.e. "1.5e-12").
+    ///   - imaginary:   Base value for precision estimation. Decimal string (i.e. "1.5e-12").
+    ///   - safetyBits:  Additional bits as safety buffer (default = 8).
+    /// - Returns:       Tuple (isDbl: Bool, precision: Int, isError: Bool)
+    public static func getPrecision(real: String, imaginary: String, scaleReal: Int = 1, scaleImaginary: Int = 1, safetyBits: Int = 8) -> (isDbl: Bool, precision: Int)? {
+
+        /// Parse exponent of floating point string
+        func parseExponent(_ string: String) -> Int? {
+            let trimmed = string.trimmingCharacters(in: .whitespaces).lowercased()
+            
+            // Try Double parsing
+            if let value = Double(trimmed), value.isFinite, value != 0 {
+                return Int(floor(log10(Swift.abs(value))))
+            }
+            
+            // Underflow/Overflow: Extract exponent from string
+            // Format: [±][digits][.digits]e[±]exponent
+            if let eIdx = trimmed.firstIndex(of: "e") {
+                let expString = String(trimmed[trimmed.index(after: eIdx)...])
+                return Int(expString)
+            }
+            
+            return nil
+        }
+        
+        // Parse exponents
+        let realExp = parseExponent(real)
+        let imagExp = parseExponent(imaginary)
+        guard var re = realExp, var ie = imagExp else { return nil }
+
+        // Scaled exponent: size / scaling
+        // log10(real / scaleReal) = log10(real) - log10(scaleReal)
+        // log10(imaginary / scaleImaginary) = log10(imaginary) - log10(scaleImaginary)
+        // log10(1) = 0 => No scaling
+        re -= Int(floor(log10(Double(scaleReal))))
+        ie -= Int(floor(log10(Double(scaleImaginary))))
+
+        let smallestExp = Swift.min(re, ie)  // negativster Exponent = kleinste Ausdehnung
+
+        // bits = ceil(-log2(10^exp)) = ceil(-exp * log2(10))
+        let log2_10 = log2(10.0)
+        let rawBits = Int(ceil(-Double(smallestExp) * log2_10))
+        let totalBits = Swift.max(rawBits + safetyBits, 53)
+        let doubleIsSufficient = rawBits <= (53 - safetyBits)
+            
+        return (doubleIsSufficient, totalBits)
+    }
+
+    //
+    // Initializers
+    //
+    
+    /// Initialize MPComplex with 0
+    public init(precision: Int = 128) {
         self.precision = precision
         self.real = MPFloat(precision: precision)
         self.imaginary = MPFloat(precision: precision)
     }
     
+    /// Initialize MPComplex with Double literal
     public init(floatLiteral value: Double) {
-        self.precision = 64
-        self.real = MPFloat(value, precision: 64)
-        self.imaginary = MPFloat(0, precision: 64)
+        self.precision = 128
+        self.real = MPFloat(value, precision: 128)
+        self.imaginary = MPFloat(0, precision: 128)
     }
     
+    /// Initialize MPComplex with Int literal
     public init(integerLiteral value: Int) {
-        self.precision = 64
-        self.real = MPFloat(value, precision: 64)
-        self.imaginary = MPFloat(0, precision: 64)
+        self.precision = 128
+        self.real = MPFloat(value, precision: 128)
+        self.imaginary = MPFloat(0, precision: 128)
     }
     
     /// Initialize MPComplex with Double values
@@ -43,10 +102,23 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     }
     
     /// Initialize MPComplex with String values
-    public init(_ real: String, _ imaginary: String = "0", precision: Int = 128) {
-        self.precision = precision
-        self.real = MPFloat(real, precision: precision)
-        self.imaginary = MPFloat(imaginary, precision: precision)
+    public init(_ real: String, _ imaginary: String = "0", precision: Int = -1) {
+        var p: Int
+        if precision <= 0 {
+            if let precisionRequirements = Self.getPrecision(real: real, imaginary: imaginary) {
+                p = precisionRequirements.precision
+            }
+            else {
+                p = 128
+            }
+        }
+        else {
+            p = precision
+        }
+        
+        self.precision = p
+        self.real = MPFloat(real, precision: p)
+        self.imaginary = MPFloat(imaginary, precision: p)
     }
     
     /// Initialize MPComplex with MPFloat values
@@ -69,21 +141,21 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     }
     
     public var length: MPFloat {
-        sqrt(norm(self))
+        MPFloat.sqrt(MPComplex.norm(self))
     }
     
     public var lengthSquared: MPFloat {
-        norm(self)
+        MPComplex.norm(self)
     }
 
     /// Return minimum of real and imaginary part
     public var min: MPFloat {
-        SwiftMPx.min(self.real, self.imaginary)
+        MPFloat.min(self.real, self.imaginary)
     }
 
     /// Return minimum of real and imaginary part
     public var max: MPFloat {
-        SwiftMPx.max(self.real, self.imaginary)
+        MPFloat.max(self.real, self.imaginary)
     }
     
     /// Negate MPComplex
@@ -172,7 +244,7 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     public static func *= (lhs: inout MPComplex, rhs: MPComplex) {
         var tmp1 = MPFloat(precision: lhs.precision)
         var tmp2 = MPFloat(precision: lhs.precision)
-        var tmp3 = lhs.real
+        let tmp3 = lhs.real
         
         // result.real = lhs.real * rhs.real - lhs.imaginary * rhs.imaginary
         mpfr_mul(&tmp1.mutableValue, &lhs.real.storage.value, &rhs.real.storage.value, MPFR_RNDN)
@@ -257,7 +329,7 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     public static func /= (lhs: inout MPComplex, rhs: MPComplex) {
         var tmp1 = MPFloat(precision: lhs.precision)
         var tmp2 = MPFloat(precision: lhs.precision)
-        var originalReal = lhs.real  // COW: keine Kopie bis tmp1/tmp2 geschrieben werden
+        let originalReal = lhs.real  // COW: keine Kopie bis tmp1/tmp2 geschrieben werden
 
         // tmp1 = rhs.real² + rhs.imag²
         mpfr_sqr(&tmp1.mutableValue, &rhs.real.storage.value, MPFR_RNDN)
@@ -298,50 +370,67 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         return lhs.real == rhs.real && lhs.imaginary == rhs.imaginary
     }
     
+    public static func != (lhs: MPComplex, rhs: MPComplex) -> Bool {
+        return lhs.real != rhs.real || lhs.imaginary != rhs.imaginary
+    }
+    
+    //
+    // Mathematic functions
+    //
+    
+    /// Square
+    public static func square(_ value: MPComplex) -> MPComplex {
+        var result = MPComplex(precision: value.precision)
+        var tmp1 = MPFloat(precision: value.precision)
+        var tmp2 = MPFloat(precision: value.precision)
+
+        mpfr_sqr(&tmp1.mutableValue, &value.real.storage.value, MPFR_RNDN)
+        mpfr_sqr(&tmp2.mutableValue, &value.imaginary.storage.value, MPFR_RNDN)
+        mpfr_sub(&result.real.mutableValue, &tmp1.storage.value, &tmp2.storage.value, MPFR_RNDN)
+        
+        mpfr_mul_ui(&tmp1.mutableValue, &value.real.storage.value, 2, MPFR_RNDN)
+        mpfr_mul(&result.imaginary.mutableValue, &tmp1.storage.value, &value.imaginary.storage.value, MPFR_RNDN)
+        
+        return result
+    }
+    
+    /// Norm / magnitude
+    public static func norm(_ value: MPComplex) -> MPFloat {
+        var result = MPFloat(precision: value.precision)
+        var tmp = MPFloat(precision: value.precision)
+
+        mpfr_sqr(&result.mutableValue, &value.real.storage.value, MPFR_RNDN)
+        mpfr_sqr(&tmp.mutableValue, &value.imaginary.storage.value, MPFR_RNDN)
+        mpfr_add(&result.mutableValue, &result.storage.value, &tmp.storage.value, MPFR_RNDN)
+        
+        return result
+    }
+    
+    /// Absolute value
+    public static func abs(_ value: MPComplex) -> MPFloat {
+        var result = MPFloat(precision: value.precision)
+        var tmp = MPFloat(precision: value.precision)
+
+        mpfr_sqr(&result.mutableValue, &value.real.storage.value, MPFR_RNDN)
+        mpfr_sqr(&tmp.mutableValue, &value.imaginary.storage.value, MPFR_RNDN)
+        mpfr_add(&result.mutableValue, &result.storage.value, &tmp.storage.value, MPFR_RNDN)
+        mpfr_sqrt(&result.mutableValue, &result.storage.value, MPFR_RNDN)
+        
+        return result
+    }
+    
+    /// Argument / phase
+    /// - Parameter value: Complex value
+    /// - Returns: atan2(imaginary, real)
+    public static func arg(_ value: MPComplex) -> MPFloat {
+        return MPFloat.atan2(value.imaginary, value.real)
+    }
+    
 }
 
-//
-// Mathematic functions
-//
 
-/// Square
-public func square(_ value: MPComplex) -> MPComplex {
-    var result = MPComplex(precision: value.precision)
-    var tmp1 = MPFloat(precision: value.precision)
-    var tmp2 = MPFloat(precision: value.precision)
 
-    mpfr_sqr(&tmp1.mutableValue, &value.real.storage.value, MPFR_RNDN)
-    mpfr_sqr(&tmp2.mutableValue, &value.imaginary.storage.value, MPFR_RNDN)
-    mpfr_sub(&result.real.mutableValue, &tmp1.storage.value, &tmp2.storage.value, MPFR_RNDN)
-    
-    mpfr_mul_ui(&tmp1.mutableValue, &value.real.storage.value, 2, MPFR_RNDN)
-    mpfr_mul(&result.imaginary.mutableValue, &tmp1.storage.value, &value.imaginary.storage.value, MPFR_RNDN)
-    
-    return result
-}
 
-/// Norm / magnitude
-public func norm(_ value: MPComplex) -> MPFloat {
-    var result = MPFloat(precision: value.precision)
-    var tmp = MPFloat(precision: value.precision)
 
-    mpfr_sqr(&result.mutableValue, &value.real.storage.value, MPFR_RNDN)
-    mpfr_sqr(&tmp.mutableValue, &value.imaginary.storage.value, MPFR_RNDN)
-    mpfr_add(&result.mutableValue, &result.storage.value, &tmp.storage.value, MPFR_RNDN)
-    
-    return result
-}
 
-/// Absolute value
-public func abs(_ value: MPComplex) -> MPFloat {
-    var result = MPFloat(precision: value.precision)
-    var tmp = MPFloat(precision: value.precision)
-
-    mpfr_sqr(&result.mutableValue, &value.real.storage.value, MPFR_RNDN)
-    mpfr_sqr(&tmp.mutableValue, &value.imaginary.storage.value, MPFR_RNDN)
-    mpfr_add(&result.mutableValue, &result.storage.value, &tmp.storage.value, MPFR_RNDN)
-    mpfr_sqrt(&result.mutableValue, &result.storage.value, MPFR_RNDN)
-    
-    return result
-}
 

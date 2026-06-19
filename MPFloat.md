@@ -41,9 +41,8 @@ CompOperator := { <, <=, >, >=, ==, != }
 
 ## Functions
 ### Precision handling
-```
-MPFloat.getPrecision(real: String, scale: Int = 1, safetyBits: Int = 8) -> (isDbl: Bool, precision: Int)?
-```
+#### MPFloat.getPrecision(real: String, scale: Int = 1, safetyBits: Int = 8) -> (isDbl: Bool, precision: Int)?
+Returns a tuple (isDbl, precision). If isDbl is true, MPFR is not needed and one can use Swifts Double type for calculation.
 
 ### Conversions
 ```

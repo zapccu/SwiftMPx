@@ -8,6 +8,9 @@
 import Foundation
 import CMPFR
 
+//
+// Complex number type with variable precision
+//
 
 public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, CustomStringConvertible, Sendable {
     
@@ -423,7 +426,7 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     /// - Parameter value: Complex value
     /// - Returns: atan2(imaginary, real)
     public static func arg(_ value: MPComplex) -> MPFloat {
-        return MPFloat.atan2(value.imaginary, value.real)
+        return MPFloat.atan2(y: value.imaginary, x: value.real)
     }
     
 }

@@ -396,7 +396,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     }
     
     //
-    // Comparision
+    // Comparision operators
     //
     
     /// MPFloat == MPFloat
@@ -534,9 +534,9 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     }
 
     /// nth root
-    public static func root(_ x: MPFloat, _ n: UInt) -> MPFloat {
+    public static func root(_ x: MPFloat, _ n: Int) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_rootn_ui(&result.storage.value, &result.storage.value, n, MPFR_RNDN)
+        mpfr_rootn_si(&result.storage.value, &result.storage.value, n, MPFR_RNDN)
         return result
     }
     
@@ -562,20 +562,28 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     }
     
     /// Power: MPFloat ^ Uint
-    public static func pow(_ x: MPFloat, _ y: UInt) -> MPFloat {
+    public static func pow(_ x: MPFloat, _ y: Int) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_pow_ui(&result.storage.value, &x.storage.value, y, MPFR_RNDN)
+        mpfr_pow_si(&result.storage.value, &x.storage.value, y, MPFR_RNDN)
         return result
     }
     
     ///
-    /// log/log2/exp/expMinusOne
+    /// Logarithm and exponential functions
     ///
 
-    /// Logarithm, return new value
+    /// Logarithm
     public static func log(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
         mpfr_log(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        return result
+    }
+    
+    /// Logarithm of (1 + x). For very small x
+    /// As we are calculating with arbitrary precision, we can simply use log(x)
+    public static func log(onePlus x: MPFloat) -> MPFloat {
+        let result = MPFloat(precision: x.precision)
+        mpfr_log1p(&result.storage.value, &x.storage.value, MPFR_RNDN)
         return result
     }
 
@@ -600,6 +608,18 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         return result
     }
     
+    public static func exp2(_ x: MPFloat) -> MPFloat {
+        let result = MPFloat(precision: x.precision)
+        mpfr_exp2(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        return result
+    }
+    
+    public static func exp10(_ x: MPFloat) -> MPFloat {
+        let result = MPFloat(precision: x.precision)
+        mpfr_exp10(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        return result
+    }
+    
     /// Exponential function minus 1: exp(x) - 1
     public static func expMinusOne(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
@@ -608,7 +628,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     }
     
     ///
-    /// sin/cos/tan/atan2
+    /// Trigonometric functions
     ///
 
     /// Sine
@@ -634,7 +654,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     
     /// The signed angle formed in the plane between the vector `(x,y)` and the
     /// positive real axis, measured in radians.
-    public static func atan2(_ y: MPFloat, _ x: MPFloat) -> MPFloat {
+    public static func atan2(y: MPFloat, x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
         mpfr_atan2(&result.storage.value, &y.storage.value, &x.storage.value, MPFR_RNDN)
         return result
@@ -660,13 +680,110 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         mpfr_atan(&result.storage.value, &x.storage.value, MPFR_RNDN)
         return result
     }
+    
+    /// Hyperbolic sine
+    public static func sinh(_ x: MPFloat) -> MPFloat {
+        let result = MPFloat(precision: x.precision)
+        mpfr_sinh(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        return result
+    }
+    
+    /// Hyperbolic cosine
+    public static func cosh(_ x: MPFloat) -> MPFloat {
+        let result = MPFloat(precision: x.precision)
+        mpfr_cosh(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        return result
+    }
+    
+    /// Hyperbolic tangent
+    public static func tanh(_ x: MPFloat) -> MPFloat {
+        let result = MPFloat(precision: x.precision)
+        mpfr_tanh(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        return result
+    }
+    
+    /// Inverse hyperbolic sine
+    public static func asinh(_ x: MPFloat) -> MPFloat {
+        let result = MPFloat(precision: x.precision)
+        mpfr_asinh(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        return result
+    }
+    
+    /// Inverse hyperbolic cosine
+    public static func acosh(_ x: MPFloat) -> MPFloat {
+        let result = MPFloat(precision: x.precision)
+        mpfr_acosh(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        return result
+    }
+    
+    /// Inverse hyperbolic tangent
+    public static func atanh(_ x: MPFloat) -> MPFloat {
+        let result = MPFloat(precision: x.precision)
+        mpfr_atanh(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        return result
+    }
+    
+    //
+    // Error handling
+    //
+    
+    /// Error function
+    public static func erf(_ x: MPFloat) -> MPFloat {
+        let result = MPFloat(precision: x.precision)
+        mpfr_erf(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        return result
+    }
+    
+    /// Complementary error function
+    public static func erfc(_ x: MPFloat) -> MPFloat {
+        let result = MPFloat(precision: x.precision)
+        mpfr_erfc(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        return result
+    }
+    
+    //
+    // Gamma functions
+    
+    // Gamma
+    public static func gamma(_ x: MPFloat) -> MPFloat {
+        let result = MPFloat(precision: x.precision)
+        mpfr_gamma(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        return result
+    }
+    
+    /// Logarithm of absolute value of gamma
+    public static func logGamma(_ x: MPFloat) -> MPFloat {
+        let result = MPFloat(precision: x.precision)
+        mpfr_lngamma(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        return result
+    }
+    
+    /// Sign of gamma
+    public static func signGamma(_ x: MPFloat) -> FloatingPointSign {
+        let result = MPFloat(precision: x.precision)
+        var sign: Int32 = 0
+        mpfr_lgamma(&result.storage.value, &sign, &x.storage.value, MPFR_RNDN)
+        return sign == 1 ? .plus : .minus
+    }
+    
+    //
+    // Other functions
+    //
+    
+    public static func hypot(_ x: MPFloat, _ y: MPFloat) -> MPFloat {
+        let result = MPFloat(precision: x.precision)
+        mpfr_hypot(&result.storage.value, &x.storage.value, &y.storage.value, MPFR_RNDN)
+        return result
+    }
 }
 
-
+//
+// Extend Double to support casting from MPFloat to Double
+//
 extension Double {
     
     /// Convert MPFloat to Double
-    init(_ mpf: MPFloat) {
+    public init(_ mpf: MPFloat) {
         self = mpf.toDouble()
     }
     

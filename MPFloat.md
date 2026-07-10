@@ -1,17 +1,39 @@
 
 # MPFloat
 
+## Precision
+
+By default all MPFloat values are using 53 bit precision, which is conform to Double.
+One can change the default precision by setting the static value MPFloat.defaultPrecision.
+
+Example:
+
+```
+MPFloat.defaultPrecision = 128
+```
+
 ## Initializers
 
 ```
-MPFloat(precision: Int = 128)
-MPFloat(Double, precision: Int = 128)
-MPFloat(String, precision: Int = 128)
-
-var x: MPFloat = 2.0   // Convert 2.0 (Double) to MPFloat
-var y: MPFloat = 2     // Convert 2 (Int) to MPFloat
+MPFloat(precision: Int = MPFloat.defaultPrecision)
+```
+Creates an empty MPFloat value (NaN).
 
 ```
+MPFloat(Double, precision: Int = MPFloat.defaultPrecision)
+```
+Initialize MPFloat value with Double value.
+
+```
+MPFloat(String, precision: Int = MPFloat.detectPrecision)
+```
+Initialize MPFloat Value with numeric String.
+
+```
+var x: MPFloat = 2.0   // Convert 2.0 (Double) to MPFloat
+var y: MPFloat = 2     // Convert 2 (Int) to MPFloat
+```
+Initialize MPFloat value by Double or Int literal.
 
 
 ## Overloaded operators

@@ -18,9 +18,21 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     public var real: MPFloat
     public var imaginary: MPFloat
     
-    // Precision (default is 128 bit)
-    public let precision: Int
-    
+    /// Get/set default precision
+    public static var defaultPrecision: Int {
+        get { MPFloat.defaultPrecision }
+        set { MPFloat.defaultPrecision = newValue }
+    }
+
+    /// Get/set precision of real and imaginary part
+    public var precision: Int {
+        get { real.precision }
+        set {
+            real.precision      = newValue
+            imaginary.precision = newValue
+        }
+    }
+        
     /// Calculate required precision
     ///
     /// - Parameters:
@@ -28,7 +40,8 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     ///   - imaginary:   Base value for precision estimation. Decimal string (i.e. "1.5e-12").
     ///   - safetyBits:  Additional bits as safety buffer (default = 8).
     /// - Returns:       Tuple (isDbl: Bool, precision: Int, isError: Bool)
-    public static func getPrecision(real: String, imaginary: String, scaleReal: Int = 1, scaleImaginary: Int = 1, safetyBits: Int = 8) -> (isDbl: Bool, precision: Int)? {
+    public static func getPrecision(real: String, imaginary: String, scaleReal: Int = 1, scaleImaginary: Int = 1,
+                                    safetyBits: Int = 8) -> (isDbl: Bool, precision: Int)? {
 
         /// Parse exponent of floating point string
         func parseExponent(_ string: String) -> Int? {
@@ -76,66 +89,67 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     // Initializers
     //
     
-    /// Initialize MPComplex with 0
-    public init(precision: Int = 128) {
-        self.precision = precision
-        self.real = MPFloat(precision: precision)
+    /// Initialize MPComplex with NaN
+    public init(precision: Int = MPFloat.defaultPrecision) {
+        self.real      = MPFloat(precision: precision)
         self.imaginary = MPFloat(precision: precision)
     }
     
     /// Initialize MPComplex with Double literal
     public init(floatLiteral value: Double) {
-        self.precision = 128
-        self.real = MPFloat(value, precision: 128)
-        self.imaginary = MPFloat(0, precision: 128)
+        self.real      = MPFloat(value)
+        self.imaginary = MPFloat(0.0)
     }
     
     /// Initialize MPComplex with Int literal
     public init(integerLiteral value: Int) {
-        self.precision = 128
-        self.real = MPFloat(value, precision: 128)
-        self.imaginary = MPFloat(0, precision: 128)
+        self.real = MPFloat(value)
+        self.imaginary = MPFloat(0)
     }
     
     /// Initialize MPComplex with Double values
-    public init(_ real: Double, _ imaginary: Double, precision: Int = 128) {
-        self.precision = precision
-        self.real = MPFloat(real, precision: precision)
+    public init(_ real: Double, _ imaginary: Double, precision: Int = MPFloat.defaultPrecision) {
+        self.real      = MPFloat(real, precision: precision)
         self.imaginary = MPFloat(imaginary, precision: precision)
     }
     
     /// Initialize MPComplex with String values
-    public init(_ real: String, _ imaginary: String = "0", precision: Int = -1) {
+    public init(_ real: String, _ imaginary: String = "0", precision: Int = MPFloat.detectPrecision) {
         var p: Int
-        if precision <= 0 {
+        if precision == MPFloat.detectPrecision {
             if let precisionRequirements = Self.getPrecision(real: real, imaginary: imaginary) {
                 p = precisionRequirements.precision
             }
             else {
-                p = 128
+                p = MPFloat.defaultPrecision
             }
+        }
+        else if precision == MPFloat.useDefaultPrecision || precision == MPFloat.useOtherPrecision {
+            p = MPFloat.defaultPrecision
         }
         else {
             p = precision
         }
         
-        self.precision = p
-        self.real = MPFloat(real, precision: p)
+        self.real      = MPFloat(real, precision: p)
         self.imaginary = MPFloat(imaginary, precision: p)
     }
     
-    /// Initialize MPComplex with MPFloat values
-    public init(_ real: MPFloat, _ imaginary: MPFloat, precision: Int = -1) {
-        let p = precision == -1 ? Swift.max(real.precision, imaginary.precision) : precision
-        self.precision = p
-        self.real = MPFloat(real, precision: p)
+    /// Initialize MPComplex with MPFloat values.
+    /// If precision is not specified, use max precision of real and imaginary.
+    public init(_ real: MPFloat, _ imaginary: MPFloat, precision: Int = MPFloat.useOtherPrecision) {
+        let p = precision == MPFloat.useOtherPrecision ? Swift.max(real.precision, imaginary.precision) : precision
+        self.real      = MPFloat(real, precision: p)
         self.imaginary = MPFloat(imaginary, precision: p)
     }
     
-    public init(_ real: MPFloat, _ imaginary: MPFloat) {
-        self.init(real, imaginary, precision: Swift.max(real.precision, imaginary.precision))
+    /// Initialize MPComplex with other MPComplex
+    public init(_ other: MPComplex, precision: Int = MPFloat.useOtherPrecision) {
+        self.real      = MPFloat(other.real, precision: precision)
+        self.imaginary = MPFloat(other.imaginary, precision: precision)
     }
     
+    /// Return zero
     public static let zero = MPComplex(0.0, 0.0, precision: 64)
     
     /// Make MPComplex printable
@@ -143,12 +157,19 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         return "\(self.real.toString()) + \(self.imaginary.toString())i"
     }
     
+    /// Euclidean norm
     public var length: MPFloat {
-        MPFloat.sqrt(MPComplex.norm(self))
+        MPFloat.sqrt(MPComplex.normSquare(self))
     }
     
+    /// Square of Euclidean norm
     public var lengthSquared: MPFloat {
-        MPComplex.norm(self)
+        MPComplex.normSquare(self)
+    }
+    
+    /// Square of value
+    public var squared: MPComplex {
+        MPComplex.square(self)
     }
 
     /// Return minimum of real and imaginary part
@@ -387,6 +408,7 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         var tmp1 = MPFloat(precision: value.precision)
         var tmp2 = MPFloat(precision: value.precision)
 
+        // real * real - imaginary * imaginary
         mpfr_sqr(&tmp1.mutableValue, &value.real.storage.value, MPFR_RNDN)
         mpfr_sqr(&tmp2.mutableValue, &value.imaginary.storage.value, MPFR_RNDN)
         mpfr_sub(&result.real.mutableValue, &tmp1.storage.value, &tmp2.storage.value, MPFR_RNDN)
@@ -397,8 +419,8 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         return result
     }
     
-    /// Norm / magnitude
-    public static func norm(_ value: MPComplex) -> MPFloat {
+    /// Square of Euclidean norm
+    public static func normSquare(_ value: MPComplex) -> MPFloat {
         var result = MPFloat(precision: value.precision)
         var tmp = MPFloat(precision: value.precision)
 
@@ -422,7 +444,7 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         return result
     }
     
-    /// Argument / phase
+    /// Angle between real and imaginary part
     /// - Parameter value: Complex value
     /// - Returns: atan2(imaginary, real)
     public static func arg(_ value: MPComplex) -> MPFloat {

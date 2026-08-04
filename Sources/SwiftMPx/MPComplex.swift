@@ -136,8 +136,14 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     }
     
     /// Initialize MPComplex with MPFloat values.
-    /// If precision is not specified, use max precision of real and imaginary.
-    public init(_ real: MPFloat, _ imaginary: MPFloat, precision: Int = MPFloat.useOtherPrecision) {
+    public init(_ real: MPFloat, _ imaginary: MPFloat) {
+        let p = Swift.max(real.precision, imaginary.precision)
+        self.real      = MPFloat(real, precision: p)
+        self.imaginary = MPFloat(imaginary, precision: p)
+    }
+    
+    /// Initialize MPComplex with MPFloat values.
+    public init(_ real: MPFloat, _ imaginary: MPFloat, precision: Int) {
         let p = precision == MPFloat.useOtherPrecision ? Swift.max(real.precision, imaginary.precision) : precision
         self.real      = MPFloat(real, precision: p)
         self.imaginary = MPFloat(imaginary, precision: p)

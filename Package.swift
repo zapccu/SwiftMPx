@@ -17,15 +17,12 @@ let package = Package(
         // Targets can depend on other targets in this package and products from dependencies.
         .systemLibrary(
             name: "CMPFR",
+            pkgConfig: "mpfr gmp",
             providers: [.brew(["mpfr", "gmp"])]
         ),
         .target(
             name: "SwiftMPx",
             dependencies: ["CMPFR"],
-            cSettings: [
-                .headerSearchPath("./include"),
-                .headerSearchPath("../../include"),
-            ]
         )
 
     ]

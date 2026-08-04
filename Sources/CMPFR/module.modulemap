@@ -1,11 +1,6 @@
 module CMPFR [system] {
-    header "/opt/homebrew/include/gmp.h"
-    header "/opt/homebrew/include/mpfr.h"
-    //header "../../include/gmp.h"
-    //header "../../include/mpfr.h"
-
+    header "shim.h"
     link "gmp"
     link "mpfr"
-
     export *
 }

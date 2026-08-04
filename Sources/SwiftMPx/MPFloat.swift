@@ -8,13 +8,6 @@
 import Foundation
 import CMPFR
 
-/*
-public enum FloatValue {
-    case dp(v: Double)
-    case ap(v: MPFloat)
-}
- */
-
 
 //
 // Floating point type with variable precision
@@ -22,13 +15,38 @@ public enum FloatValue {
 
 public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, Comparable, CustomStringConvertible, Sendable {
 
+    //
     // Type for precision information
-    public typealias Precision = (isDbl: Bool, precision: Int)
+    //
+    public struct Precision: Sendable, Codable, Equatable {
+        public var isDbl: Bool
+        public var bits: Int
+        
+        public init(isDbl: Bool, bits: Int) {
+            self.isDbl = isDbl
+            self.bits = bits
+        }
+    }
+    
+    //
+    // Flags
+    //
+    public enum Flag {
+        case inexact        // Inexact / rounded value
+        case nan            // Not a number
+        case underflow      // Underflow
+        case overflow       // Overflow
+        case erange         // Range error
+        
+        public static func clearAll() {
+            mpfr_clear_flags()
+        }
+    }
+    
 
     //
     // Class for internal storage
     //
-    
     internal final class Storage: @unchecked Sendable {
         var value: mpfr_t
         
@@ -167,7 +185,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
             let totalBits = Swift.max(rawBits + safetyBits, 53)
             let doubleIsSufficient = rawBits <= (53 - safetyBits)
             
-            return (doubleIsSufficient, totalBits)
+            return Precision(isDbl: doubleIsSufficient, bits: totalBits)
         }
         
         return nil
@@ -200,11 +218,11 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// Initialize a value with a String
     /// - Parameters:
     ///   - sval: A number as a string
-    ///   - precision: Required precision / number of bits. -1 = detect precision
-    public init(_ sval: String, precision: Int = MPFloat.defaultPrecision) {
+    ///   - precision: Required precision / number of bits.
+    public init(_ sval: String, precision: Int = MPFloat.detectPrecision) {
         if precision == MPFloat.detectPrecision {
             if let precisionRequirements = Self.getPrecision(real: sval, safetyBits: 8) {
-                _precision = precisionRequirements.precision
+                _precision = precisionRequirements.bits
             }
             else {
                 _precision = MPFloat.defaultPrecision
@@ -252,6 +270,31 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         storage = Storage(precision: _precision)
         mpfr_set(&storage.value, &other.storage.value, MPFR_RNDN)
     }
+    
+    //
+    // Tests and checks
+    //
+    
+    /// Check for zero
+    public func isZero() -> Bool {
+        mpfr_zero_p(&storage.value) != 0 ? true : false
+    }
+    
+    /// Check flag
+    public static func isFlagSet(_ flag: Flag) -> Bool {
+        switch flag {
+        case .inexact:
+            mpfr_inexflag_p() != 0 ? true : false
+        case .underflow:
+            mpfr_underflow_p() != 0 ? true : false
+        case .overflow:
+            mpfr_overflow_p() != 0 ? true : false
+        case .erange:
+            mpfr_erangeflag_p() != 0 ? true : false
+        case .nan:
+            mpfr_nanflag_p() != 0 ? true : false
+        }
+    }
 
     //
     // Conversion functions
@@ -263,7 +306,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     }
 
     /// Convert value to String
-    /// - Parameter digits: Number of decimal digits, default = 32
+    /// - Parameter digits: Number of decimal digits
     /// - Returns: Value as string or "NaN" on error
     public func toString(digits: Int) -> String {
         var exp: mpfr_exp_t = 0
@@ -313,7 +356,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     }
     
     public func toString() -> String {
-        self.toString(digits: 32)
+        self.toString(digits: 0)
     }
     
     //
@@ -855,8 +898,8 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
 //
 extension Double {
     
-    /// Convert MPFloat to Double
-    public init(_ mpf: MPFloat) {
+    /// Convert MPFloat to Double. Parameter precision is not used
+    public init(_ mpf: MPFloat, precision: Int = 53) {
         self = mpf.toDouble()
     }
     

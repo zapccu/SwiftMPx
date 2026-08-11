@@ -15,9 +15,9 @@ import CMPFR
 
 public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, Comparable, CustomStringConvertible, Sendable {
 
-    //
-    // Type for precision information
-    //
+    ///
+    /// Type for precision information
+    ///
     public struct Precision: Sendable, Codable, Equatable {
         public var isDbl: Bool
         public var bits: Int
@@ -28,9 +28,9 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         }
     }
     
-    //
-    // Flags
-    //
+    ///
+    /// Flags
+    ///
     public enum Flag {
         case inexact        // Inexact / rounded value
         case nan            // Not a number
@@ -89,6 +89,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         }
     }
     
+    /// Precision bits
     private var _precision: Int
 
     /// Precision flags
@@ -201,14 +202,14 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         storage = Storage(precision: _precision)
     }
     
-    /// Initialize by assigning Double value
+    /// Initialize by assigning a Double value
     public init(floatLiteral value: Double) {
         _precision = MPFloat.defaultPrecision
         storage = Storage(precision: _precision)
         mpfr_set_d(&storage.value, value, MPFR_RNDN)
     }
     
-    /// Initialize by assigning Int value
+    /// Initialize by assigning an Int value
     public init(integerLiteral value: Int) {
         _precision = MPFloat.defaultPrecision
         storage = Storage(precision: _precision)

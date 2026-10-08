@@ -44,9 +44,9 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     }
     
 
-    //
-    // Class for internal storage
-    //
+    ///
+    /// Class for internal storage
+    ///
     internal final class Storage: @unchecked Sendable {
         var value: mpfr_t
         
@@ -66,7 +66,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         }
     }
     
-    // Internal storage
+    /// Internal storage
     internal var storage: Storage
     
     //
@@ -144,7 +144,6 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     }
     
     /// Calculate required precision for numeric string
-    ///
     /// - Parameters:
     ///   - real:        Base value for precision estimation. Decimal string (i.e. "1.5e-12").
     ///   - scale:       Scaling factor, default = 1 (no scaling)
@@ -282,6 +281,13 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     }
     
     /// Check flag
+    /// - Parameter flag: Flag:
+    ///   - .inexact
+    ///   - .underflow
+    ///   - .overflow
+    ///   - .erange
+    ///   - .nan
+    /// - Returns: true if flag is set
     public static func isFlagSet(_ flag: Flag) -> Bool {
         switch flag {
         case .inexact:
@@ -302,14 +308,17 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     //
     
     /// Convert value to Double
+    /// - Returns: Double value
     public func toDouble() -> Double {
         return mpfr_get_d(&self.storage.value, MPFR_RNDN)
     }
 
     /// Convert value to String
-    /// - Parameter digits: Number of decimal digits
+    /// - Parameters:
+    ///   - digits: Number of decimal digits. 0 = maximum number of digits
+    ///   - expFmt: If true (default) use exponential format for values with negativ exponent
     /// - Returns: Value as string or "NaN" on error
-    public func toString(digits: Int) -> String {
+    public func toString(digits: Int, expFmt: Bool = true) -> String {
         var exp: mpfr_exp_t = 0
         
         // MPFR returns digits without decimal point and exponent separately
@@ -317,6 +326,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
             return "NaN"
         }
         
+        // Convert C-String to Swift String and free memory of C-String
         var rawDigits = String(cString: cStr)
         mpfr_free_str(cStr)
         
@@ -342,9 +352,18 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
             result += String(repeating: "0", count: Int(exp) - rawDigits.count)
         } else {
             // Case 3: Very small number "0.000123"
-            result += "0."
-            result += String(repeating: "0", count: Swift.abs(Int(exp)))
-            result += rawDigits
+            if expFmt {
+                if let firstChar = rawDigits.first {
+                    result += String(firstChar) + "."
+                    result += rawDigits.dropFirst()
+                }
+                result += "E" + String(exp - 1)
+            }
+            else {
+                result += "0."
+                result += String(repeating: "0", count: Swift.abs(Int(exp)))
+                result += rawDigits
+            }
         }
         
         // Trim zeroes
@@ -356,6 +375,8 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         return result
     }
     
+    /// Convert MPFloat to String
+    /// - Returns: Numeric string
     public func toString() -> String {
         self.toString(digits: 0)
     }
@@ -861,7 +882,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     // Gamma functions
     //
     
-    // Gamma
+    /// Gamma correction
     public static func gamma(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
         mpfr_gamma(&result.storage.value, &x.storage.value, MPFR_RNDN)
@@ -884,6 +905,59 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     }
     
     //
+    // Interpolation functions
+    //
+    
+    /// Linear interpolation
+    /// - Parameters:
+    ///   - a: Start / lower value
+    ///   - b: End / upper value
+    ///   - t: Interpolation factor. Should be in range 0...1
+    /// - Returns: Interpolated value
+    @inline(__always)
+    public static func lerp(a: Self, b: Self, t: Self) -> Self {
+        return a + (b - a) * t
+    }
+    
+    /// Exact linear interpolation
+    /// - Parameters:
+    ///   - a: Start / lower value
+    ///   - b: End / upper value
+    ///   - t: Interpolation factor. Should be in range 0...1
+    /// - Returns: Interpolated value
+    @inline(__always)
+    public static func lerpExact(a: Self, b: Self, t: Self) -> Self {
+        return (1.0 - t) * a + t * b
+    }
+
+    /// Cubic interpolation
+    public static func interpolateCubic(edge0: Self, edge1: Self, x: Self) -> Self {
+        // map x into [0, 1]
+        // If x < edge0: t = 0; if x > edge1: t = 1
+        let t = Self.min(Self.max((x - edge0) / (edge1 - edge0), 0.0), 1.0)
+        
+        // Cubic Hermite interpolation
+        return t * t * (3.0 - 2.0 * t)
+    }
+    
+    /// Create an array with linear distributed foating point values
+    /// - Parameters:
+    ///   - start: First value of array
+    ///   - end: Last value of array
+    ///   - n: Number of values in array
+    /// - Returns: Array of size n
+    public static func linspace(_ start: Self, _ end: Self, _ n: Int) -> [Self] {
+        guard n > 0 else { return [] }
+        let step = (end - start) / Self(n - 1, precision: start.precision)
+        var a = Array(0..<n).map { Self($0, precision: start.precision) * step + start }
+        
+        // Prevent rounding errors for last array element
+        if n > 1 { a[n-1] = end }
+        
+        return a
+    }
+    
+    //
     // Other functions
     //
     
@@ -892,6 +966,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         mpfr_hypot(&result.storage.value, &x.storage.value, &y.storage.value, MPFR_RNDN)
         return result
     }
+    
 }
 
 //

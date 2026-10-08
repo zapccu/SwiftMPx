@@ -155,12 +155,16 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         self.imaginary = MPFloat(other.imaginary, precision: precision)
     }
     
-    /// Return zero
-    public static let zero = MPComplex(0.0, 0.0, precision: 64)
-    
     /// Make MPComplex printable
     public var description: String {
-        return "\(self.real.toString()) + \(self.imaginary.toString())i"
+        let sign: String = self.imaginary < 0.0 ? "-" : "+"
+        return "\(self.real.toString())\(sign)\(MPFloat.abs(self.imaginary).toString())i"
+    }
+    
+    /// Return value as String
+    public func toString(digits: Int = 0, expFmt: Bool = true) -> String {
+        let sign: String = self.imaginary < 0.0 ? "-" : "+"
+        return "\(self.real.toString(digits: digits, expFmt: expFmt))" + sign + "\(MPFloat.abs(self.imaginary).toString(digits: digits, expFmt: expFmt))i"
     }
     
     /// Euclidean norm

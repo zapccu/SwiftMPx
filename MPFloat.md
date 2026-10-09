@@ -4,12 +4,22 @@
 ## Precision
 
 By default all MPFloat values are using 53 bit precision, which is conform to Double.
-One can change the default precision by setting the static value MPFloat.defaultPrecision.
+One can change the default precision by using the static function MPFloat.setPrecisions()
+The precision of operations with 2 operands (like +, -, \*, /) can also be set with this function.
+Possible options for result precision are:
+* .leftOperand: operation result precision is precision of left operand
+- .rightOperand: operation result precision is precision of right operand
+- .maxOfOperands: operation result precision is maximum precision of operands
+- .defaultPrecision: operation result precision is the default precision
+
+Default values are:
+* default precision = 128 bit
+- operation result precision = .maxOfOperands
 
 Example:
 
 ```
-MPFloat.defaultPrecision = 128
+MPFloat.setPrecisions(defaultPrecision: 128, resultPrecision: .maxOfOperands)
 ```
 
 ## Initializers

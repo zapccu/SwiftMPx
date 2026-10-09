@@ -42,7 +42,6 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
             mpfr_clear_flags()
         }
     }
-    
 
     ///
     /// Class for internal storage
@@ -89,6 +88,18 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         }
     }
     
+    /// Result precision mode
+    public enum ResultPrecision: Int, Sendable {
+        case leftOperand
+        case rightOperand
+        case defaultPrecision
+        case maxOfOperands
+    }
+    
+    /// Result precision mode for functions with 2 or more arguments
+    /// WARNING: This variable must not be set within parallel threads. This would cause a race condition!
+    nonisolated(unsafe)private static var _resultPrecision: ResultPrecision = .maxOfOperands
+    
     /// Precision bits
     private var _precision: Int
 
@@ -98,7 +109,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     public static let useDefaultPrecision: Int = -2
     
     /// Get/set the default precision
-    public static var defaultPrecision: Int {
+    public private(set) static var defaultPrecision: Int {
         get { mpfr_get_default_prec() }
         set { mpfr_set_default_prec(newValue) }
     }
@@ -141,6 +152,27 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
             return 0
         }
         return Int(mpfr_get_exp(&storage.value))
+    }
+    
+    /// Return result precision
+    @inline(__always)
+    private static func rp(_ p1: Int, _ p2: Int) -> Int {
+        switch Self._resultPrecision {
+        case .leftOperand:
+            return p1
+        case .rightOperand:
+            return p2
+        case .maxOfOperands:
+            return Swift.max(p1, p2)
+        case .defaultPrecision:
+            return Self.defaultPrecision
+        }
+    }
+    
+    public static func setPrecisions(defaultPrecision: Int, resultPrecision: ResultPrecision) {
+        guard Thread.isMainThread else { return }
+        Self._resultPrecision = resultPrecision
+        Self.defaultPrecision = defaultPrecision
     }
     
     /// Calculate required precision for numeric string
@@ -302,7 +334,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
             mpfr_nanflag_p() != 0 ? true : false
         }
     }
-
+    
     //
     // Conversion functions
     //
@@ -377,6 +409,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     
     /// Convert MPFloat to String
     /// - Returns: Numeric string
+    @inline(__always)
     public func toString() -> String {
         self.toString(digits: 0)
     }
@@ -398,21 +431,21 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     
     /// Addition: MPFloat + MPFloat, precision = lhs.precision
     public static func + (_ lhs: MPFloat, _ rhs: MPFloat) -> MPFloat {
-        let result = MPFloat(precision: lhs.precision)
+        let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
         mpfr_add(&result.storage.value, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
         return result
     }
     
     /// Addition: MPFloat + Double
     public static func + (_ lhs: MPFloat, _ rhs: Double) -> MPFloat {
-        let result = MPFloat(precision: lhs.precision)
+        let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
         mpfr_add_d(&result.storage.value, &lhs.storage.value, rhs, MPFR_RNDN)
         return result
     }
     
     /// Addition: Double + MPFloat
     public static func + (_ lhs: Double, _ rhs: MPFloat) -> MPFloat {
-        let result = MPFloat(precision: rhs.precision)
+        let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
         mpfr_add_d(&result.storage.value, &rhs.storage.value, lhs, MPFR_RNDN)
         return result
     }
@@ -433,21 +466,21 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     
     /// Subtraction: MPFloat - MPFloat
     public static func - (_ lhs: MPFloat, _ rhs: MPFloat) -> MPFloat {
-        let result = MPFloat(precision: lhs.precision)
+        let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
         mpfr_sub(&result.storage.value, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
         return result
     }
     
     /// Subtraction: MPFloat - Double
     public static func - (_ lhs: MPFloat, _ rhs: Double) -> MPFloat {
-        let result = MPFloat(precision: lhs.precision)
+        let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
         mpfr_sub_d(&result.storage.value, &lhs.storage.value, rhs, MPFR_RNDN)
         return result
     }
     
     /// Subtraction: Double - MPFloat
     public static func - (_ lhs: Double, _ rhs: MPFloat) -> MPFloat {
-        let result = MPFloat(precision: rhs.precision)
+        let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
         mpfr_d_sub(&result.storage.value, lhs, &rhs.storage.value, MPFR_RNDN)
         return result
     }
@@ -468,21 +501,21 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     
     /// Multiplication: MPFloat * MPFloat
     public static func * (_ lhs: MPFloat, _ rhs: MPFloat) -> MPFloat {
-        let result = MPFloat(precision: lhs.precision)
+        let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
         mpfr_mul(&result.storage.value, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
         return result
     }
     
     /// Multiplication: MPFloat * Double
     public static func * (_ lhs: MPFloat, _ rhs: Double) -> MPFloat {
-        let result = MPFloat(precision: lhs.precision)
+        let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
         mpfr_mul_d(&result.storage.value, &lhs.storage.value, rhs, MPFR_RNDN)
         return result
     }
     
     /// Multiplication: Double * MPFloat
     public static func * (_ lhs: Double, _ rhs: MPFloat) -> MPFloat {
-        let result = MPFloat(precision: rhs.precision)
+        let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
         mpfr_mul_d(&result.storage.value, &rhs.storage.value, lhs, MPFR_RNDN)
         return result
     }
@@ -503,21 +536,21 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     
     /// Divison: MPFloat / MPFloat
     public static func / (_ lhs: MPFloat, _ rhs: MPFloat) -> MPFloat {
-        let result = MPFloat(precision: lhs.precision)
+        let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
         mpfr_div(&result.storage.value, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
         return result
     }
     
     /// Divison: MPFloat / Double
     public static func / (_ lhs: MPFloat, _ rhs: Double) -> MPFloat {
-        let result = MPFloat(precision: lhs.precision)
+        let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
         mpfr_div_d(&result.storage.value, &lhs.storage.value, rhs, MPFR_RNDN)
         return result
     }
     
     /// Division: Double / MPFloat
     public static func / (_ lhs: Double, _ rhs: MPFloat) -> MPFloat {
-        let result = MPFloat(precision: rhs.precision)
+        let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
         mpfr_d_div(&result.storage.value, lhs, &rhs.storage.value, MPFR_RNDN)
         return result
     }
@@ -597,15 +630,17 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     //
     
     /// Return PI with specified precision
-    public static func PI(precision: Int = 128) -> MPFloat {
-        let result = MPFloat(precision: precision)
+    @inline(__always)
+    public static func PI(precision: Int = useDefaultPrecision) -> MPFloat {
+        let result = MPFloat(precision: precision == useDefaultPrecision ? Self.defaultPrecision : precision)
         mpfr_const_pi(&result.storage.value, MPFR_RNDN)
         return result
     }
 
     /// Return ln(2) with specified precision
-    public static func LOG2(precision: Int = 128) -> MPFloat {
-        let result = MPFloat(precision: precision)
+    @inline(__always)
+    public static func LOG2(precision: Int = useDefaultPrecision) -> MPFloat {
+        let result = MPFloat(precision: precision == useDefaultPrecision ? Self.defaultPrecision : precision)
         mpfr_const_log2(&result.storage.value, MPFR_RNDN)
         return result
     }
@@ -973,6 +1008,9 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
 // Extend Double to support casting from MPFloat to Double
 //
 extension Double {
+
+    /// Return Double precision
+    var precision: Int { 53 }
     
     /// Convert MPFloat to Double. Parameter precision is not used
     public init(_ mpf: MPFloat, precision: Int = 53) {

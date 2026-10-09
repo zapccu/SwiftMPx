@@ -17,12 +17,6 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     // Real und imaginary parts
     public var real: MPFloat
     public var imaginary: MPFloat
-    
-    /// Get/set default precision
-    public static var defaultPrecision: Int {
-        get { MPFloat.defaultPrecision }
-        set { MPFloat.defaultPrecision = newValue }
-    }
 
     /// Get/set precision of real and imaginary part
     public var precision: Int {

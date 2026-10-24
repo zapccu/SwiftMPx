@@ -254,7 +254,8 @@ struct PrecisionTests {
         let s = "-0.743643887037158704752191506114774"
         let x = MPFloat(s)
         #expect(x.precision > 53)
-        #expect(x.toString().hasPrefix("-0.74364388703715870475219150611477"))
+        // expFmt: false, because toString() uses exponential format for |x| < 1
+        #expect(x.toString(digits: 0, expFmt: false).hasPrefix("-0.74364388703715870475219150611477"))
     }
 
     @Test func stringInitKeepsMagnitudeBasedPrecisionAsLowerBound() {
@@ -265,7 +266,7 @@ struct PrecisionTests {
     @Test func complexStringInitDoesNotTruncateLongMantissa() {
         let z = MPComplex("-0.743643887037158704752191506114774", "0.131825904205311970493132056385139")
         #expect(z.precision > 53)
-        #expect(z.imaginary.toString().hasPrefix("0.13182590420531197049313205638513"))
+        #expect(z.imaginary.toString(digits: 0, expFmt: false).hasPrefix("0.13182590420531197049313205638513"))
     }
 
     // Previously these calls passed negative or zero precisions to mpfr_init2 (MPFR assertion, abort).

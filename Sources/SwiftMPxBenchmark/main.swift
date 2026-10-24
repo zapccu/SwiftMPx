@@ -65,3 +65,53 @@ for p in precisions {
     ]
     print(cols.map { $0.padding(toLength: 15, withPad: " ", startingAt: 0) }.joined())
 }
+
+print("\nSwiftMPx benchmark: D = 2·D·Z + 1, Z = Z² + c, \(iterations) iterations\n")
+
+let header2 = ["bits", "operators", "formMandelbrotStep", "speedup"]
+print(header2.map { $0.padding(toLength: 20, withPad: " ", startingAt: 0) }.joined())
+
+for p in precisions {
+    let c = MPComplex("-0.1", "0.123456789", precision: p)
+    let one = MPComplex(1.0, 0.0, precision: p)
+    let two = MPFloat(2.0, precision: p)
+
+    // 1. Operators: several new values per iteration
+    var dOps = MPComplex(precision: p)
+    let t1 = measure {
+        var z = MPComplex(0.0, 0.0, precision: p)
+        var d = MPComplex(1.0, 0.0, precision: p)
+        for _ in 0..<iterations {
+            d = two * d * z + one
+            z = z * z + c
+        }
+        dOps = d
+        return z
+    }
+
+    // 2. In place with reused scratch value
+    var dInPlace = MPComplex(precision: p)
+    let t2 = measure {
+        var z = MPComplex(0.0, 0.0, precision: p)
+        var d = MPComplex(1.0, 0.0, precision: p)
+        var scratch = MPComplex.makeScratch(precision: p)
+        for _ in 0..<iterations {
+            MPComplex.formMandelbrotStep(z: &z, d: &d, c: c, scratch: &scratch)
+        }
+        dInPlace = d
+        return z
+    }
+
+    // Sanity check: both variants converge to the same values (up to rounding)
+    let diff = MPComplex.abs(dOps - dInPlace).toDouble()
+    precondition(diff < 1e-30, "formMandelbrotStep differs from operators: \(diff)")
+    precondition(!t1.result.real.isNaN && !t2.result.real.isNaN, "orbit diverged")
+
+    let cols = [
+        "\(p)",
+        String(format: "%.3f s", t1.seconds),
+        String(format: "%.3f s", t2.seconds),
+        String(format: "%.1fx", t1.seconds / t2.seconds)
+    ]
+    print(cols.map { $0.padding(toLength: 20, withPad: " ", startingAt: 0) }.joined())
+}

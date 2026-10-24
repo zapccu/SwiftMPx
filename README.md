@@ -50,6 +50,20 @@ for _ in 0..<maxIter {
 }
 ```
 
+For the Mandelbrot iteration with derivative (distance estimation) use formMandelbrotStep, which
+computes D = 2·D·Z + 1 with the current Z and then Z = Z² + c:
+
+```
+var d = MPComplex(1.0, 0.0, precision: 256)
+for _ in 0..<maxIter {
+    MPComplex.formMandelbrotStep(z: &z, d: &d, c: c, scratch: &scratch)
+}
+```
+
+The protocol `ComplexIteration` (makeScratch, formSquareAdd, formDerivativeStep, formMandelbrotStep)
+allows generic iteration code for MPComplex and Complex<Double>. A conformance for Complex<Double>
+(swift-numerics) is shown in the documentation of `ComplexIteration` in ComplexIteration.swift.
+
 Complex multiplication, division, square and norm use `mpfr_fmma` / `mpfr_fmms`, which compute
 expressions like `ac - bd` with a single rounding.
 

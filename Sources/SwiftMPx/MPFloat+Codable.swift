@@ -31,7 +31,17 @@ extension MPFloat: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let stringValue = try container.decode(String.self, forKey: .value)
         let precision   = try container.decode(Int.self, forKey: .precision)
-        self.init(stringValue, precision: precision)
+        
+        // Invalid precision values would cause an MPFR assertion (abort)
+        guard MPFloat.isValidPrecision(precision) else {
+            throw DecodingError.dataCorruptedError(forKey: .precision, in: container,
+                debugDescription: "Invalid MPFloat precision \(precision)")
+        }
+        guard let value = MPFloat(validating: stringValue, precision: precision) else {
+            throw DecodingError.dataCorruptedError(forKey: .value, in: container,
+                debugDescription: "Invalid MPFloat value \"\(stringValue)\"")
+        }
+        self = value
     }
     
 }

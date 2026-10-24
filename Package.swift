@@ -5,6 +5,11 @@ import PackageDescription
 
 let package = Package(
     name: "SwiftMPx",
+    // macOS 15 / iOS 18 required for Atomic (Synchronization module)
+    platforms: [
+        .macOS(.v15),
+        .iOS(.v18)
+    ],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
@@ -18,12 +23,18 @@ let package = Package(
         .systemLibrary(
             name: "CMPFR",
             pkgConfig: "mpfr gmp",
-            providers: [.brew(["mpfr", "gmp"])]
+            providers: [
+                .brew(["mpfr", "gmp"]),
+                .apt(["libmpfr-dev", "libgmp-dev"])
+            ]
         ),
         .target(
             name: "SwiftMPx",
-            dependencies: ["CMPFR"],
+            dependencies: ["CMPFR"]
+        ),
+        .testTarget(
+            name: "SwiftMPxTests",
+            dependencies: ["SwiftMPx"]
         )
-
     ]
 )

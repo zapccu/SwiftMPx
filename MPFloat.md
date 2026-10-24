@@ -13,8 +13,13 @@ Possible options for result precision are:
 - .defaultPrecision: operation result precision is the default precision
 
 Default values are:
-* default precision = 128 bit
+* default precision = 53 bit
 - operation result precision = .maxOfOperands
+
+Both settings are global and stored atomically, so they are visible in all threads and tasks.
+(MPFR's own default precision is thread-local and therefore not used.) setPrecisions() can be
+called from any thread, but changing the settings while calculations are running affects all
+subsequent operations.
 
 Example:
 
@@ -37,7 +42,17 @@ Initialize MPFloat value with Double value.
 ```
 MPFloat(String, precision: Int = MPFloat.detectPrecision)
 ```
-Initialize MPFloat Value with numeric String.
+Initialize MPFloat Value with numeric String. With MPFloat.detectPrecision the precision is
+derived from the number of significant digits and the magnitude of the value. Invalid strings
+result in NaN.
+
+```
+MPFloat?(validating: String, precision: Int = MPFloat.detectPrecision)
+```
+Like above, but returns nil if the string is not a valid number.
+
+Special values are converted to and from strings as "@NaN@", "@Inf@", "-@Inf@" and "-0".
+Comparisons follow IEEE 754: every comparison with NaN is false, except !=.
 
 ```
 var x: MPFloat = 2.0   // Convert 2.0 (Double) to MPFloat

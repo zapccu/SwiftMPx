@@ -117,6 +117,7 @@ MPFloat.erf(_ x: MPFloat) -
 MPFloat.erfc(_ x: MPFloat) -
 MPFloat.exp(_ x: MPFloat) - Exponential function
 MPFloat.expMinusOne(_ x: MPFloat) - exp(x)-1 for small x
+MPFloat.fma(_ x: MPFloat, _ y: MPFloat, _ z: MPFloat) - Calculate x * y + z
 MPFloat.fmod(_ x: MPFloat, _ y: MPFloat) - Floating point modulo division
 MPFloat.gamma(_ x: MPFloat) - Gamma
 MPFloat.hypot(_ x: MPFloat, _ y: MPFloat)
@@ -128,6 +129,7 @@ MPFloat.logGamma(_ x: MPFloat) - Logarithm of absolute value of gamma
 MPFloat.LOG2() - ln(2) with specified precision
 MPFloat.max(_ x: MPFloat, _ y: MPFloat) - Maximum of two values
 MPFloat.min(_ x: MPFloat, _ y: MPFloat) - Minimum of two values
+MPFloat.mul2(_ x: MPFloat) - Multiply by 2
 MPFloat.PI() - pi with specified precision
 MPFloat.pow(_ x: MPFloat, _ y: MPFloat) - Power
 MPFloat.pow(_ x: MPFloat, _ y: Int) - Power

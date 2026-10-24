@@ -398,7 +398,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     //
     
     /// Check for zero
-    public func isZero() -> Bool {
+    public var isZero: Bool {
         mpfr_zero_p(&storage.value) != 0 ? true : false
     }
     
@@ -810,6 +810,20 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     public static func square(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
         mpfr_sqr(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        return result
+    }
+    
+    /// Multiplication by 2
+    public static func mul2(_ x: MPFloat) -> MPFloat {
+        let result = MPFloat(precision: x.precision)
+        mpfr_mul_2ui(&result.storage.value, &x.storage.value, 1, MPFR_RNDN)
+        return result
+    }
+    
+    /// Calculate x * y + z
+    public static func fma(_ x: MPFloat, _ y: MPFloat, _ z: MPFloat) -> MPFloat {
+        let result = MPFloat(precision: x.precision)
+        mpfr_fma(&result.storage.value, &x.storage.value, &y.storage.value, &z.storage.value, MPFR_RNDN)
         return result
     }
     

@@ -426,56 +426,7 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         mpfr_hypot(&result.mutableValue, &value.real.storage.value, &value.imaginary.storage.value, MPFR_RNDN)
         return result
     }
-    
-    //
-    // In-place iteration (no allocations)
-    //
-    
-    /// z = z² + c, in place.
-    /// Intended for hot loops like the calculation of a reference orbit. With a scratch value that is
-    /// reused across iterations, no memory is allocated per iteration.
-    /// - Parameters:
-    ///   - c:       Value to add
-    ///   - scratch: Temporary value, reused across calls. Its precision is adjusted to the
-    ///              precision of self if necessary (allocation only on first use).
-    public mutating func formSquareAdd(_ c: MPComplex, scratch: inout MPFloat) {
-        if scratch.precision != real.precision {
-            scratch = MPFloat(precision: real.precision)
-        }
-        
-        // scratch = a² - b², from the original values
-        mpfr_fmms(&scratch.mutableValue,
-                  &real.storage.value, &real.storage.value,
-                  &imaginary.storage.value, &imaginary.storage.value, MPFR_RNDN)
-        
-        // imaginary = 2ab + c.imaginary
-        mpfr_mul(&imaginary.mutableValue, &real.storage.value, &imaginary.storage.value, MPFR_RNDN)
-        mpfr_mul_2ui(&imaginary.mutableValue, &imaginary.storage.value, 1, MPFR_RNDN)
-        mpfr_add(&imaginary.mutableValue, &imaginary.storage.value, &c.imaginary.storage.value, MPFR_RNDN)
-        
-        // real = a² - b² + c.real
-        mpfr_add(&real.mutableValue, &scratch.storage.value, &c.real.storage.value, MPFR_RNDN)
-    }
-    
-    /// z = z² + c, in place (allocates one temporary value per call)
-    public mutating func formSquareAdd(_ c: MPComplex) {
-        var scratch = MPFloat(precision: real.precision)
-        formSquareAdd(c, scratch: &scratch)
-    }
-    
-    /// z = z², in place
-    public mutating func formSquare(scratch: inout MPFloat) {
-        if scratch.precision != real.precision {
-            scratch = MPFloat(precision: real.precision)
-        }
-        mpfr_fmms(&scratch.mutableValue,
-                  &real.storage.value, &real.storage.value,
-                  &imaginary.storage.value, &imaginary.storage.value, MPFR_RNDN)
-        mpfr_mul(&imaginary.mutableValue, &real.storage.value, &imaginary.storage.value, MPFR_RNDN)
-        mpfr_mul_2ui(&imaginary.mutableValue, &imaginary.storage.value, 1, MPFR_RNDN)
-        swap(&real, &scratch)
-    }
-    
+
     /// Angle between real and imaginary part
     /// - Parameter value: Complex value
     /// - Returns: atan2(imaginary, real)

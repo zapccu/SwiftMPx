@@ -5,9 +5,11 @@ import PackageDescription
 
 let package = Package(
     name: "SwiftMPx",
-    // macOS 15 / iOS 18 required for Atomic (Synchronization module)
+    // macOS 15 / iOS 18 are required for Atomic (Synchronization module).
+    // macOS 26 matches the deployment target of the Homebrew MPFR/GMP dylibs
+    // (avoids the linker warning "built for newer version 26.0").
     platforms: [
-        .macOS(.v15),
+        .macOS(.v26),
         .iOS(.v18)
     ],
     products: [

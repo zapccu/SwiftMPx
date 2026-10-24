@@ -65,8 +65,9 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         // log10(real / scaleReal) = log10(real) - log10(scaleReal)
         // log10(imaginary / scaleImaginary) = log10(imaginary) - log10(scaleImaginary)
         // log10(1) = 0 => No scaling
-        re -= Int(floor(log10(Double(scaleReal))))
-        ie -= Int(floor(log10(Double(scaleImaginary))))
+        // Scaling factors < 1 are ignored (log10(0) = -inf would trap when converted to Int)
+        re -= Int(floor(log10(Swift.max(Double(scaleReal), 1.0))))
+        ie -= Int(floor(log10(Swift.max(Double(scaleImaginary), 1.0))))
 
         let smallestExp = Swift.min(re, ie)  // negativster Exponent = kleinste Ausdehnung
 
@@ -111,12 +112,12 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     public init(_ real: String, _ imaginary: String = "0", precision: Int = MPFloat.detectPrecision) {
         var p: Int
         if precision == MPFloat.detectPrecision {
-            if let precisionRequirements = Self.getPrecision(real: real, imaginary: imaginary) {
-                p = precisionRequirements.precision
-            }
-            else {
-                p = MPFloat.defaultPrecision
-            }
+            // Magnitude based estimation (previous behaviour) as lower bound, plus number of
+            // significant digits of both parts, so that long mantissas are not truncated
+            let magnitudeBits = Self.getPrecision(real: real, imaginary: imaginary)?.precision ?? MPFloat.defaultPrecision
+            p = Swift.max(magnitudeBits,
+                          MPFloat.requiredPrecision(forDecimalString: real),
+                          MPFloat.requiredPrecision(forDecimalString: imaginary))
         }
         else if precision == MPFloat.useDefaultPrecision || precision == MPFloat.useOtherPrecision {
             p = MPFloat.defaultPrecision
@@ -338,17 +339,23 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     }
     
     /// Division: MPFloat, MPComplex
+    /// lhs / (c + di) = lhs * (c - di) / (c² + d²)
     public static func / (_ lhs: MPFloat, _ rhs: MPComplex) -> MPComplex {
         var result = MPComplex(precision: rhs.precision)
-        var tmp = MPFloat(precision: rhs.precision)
+        var den = MPFloat(precision: rhs.precision)
 
-        mpfr_ui_div(&tmp.mutableValue, 1, &lhs.storage.value, MPFR_RNDN)
+        // den = c² + d²
+        mpfr_fmma(&den.mutableValue, &rhs.real.storage.value, &rhs.real.storage.value,
+                  &rhs.imaginary.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
 
-        // result.real = rhs.real * tmp1
-        mpfr_mul(&result.real.mutableValue, &rhs.real.storage.value, &tmp.storage.value, MPFR_RNDN)
+        // result.real = lhs * c / den
+        mpfr_mul(&result.real.mutableValue, &lhs.storage.value, &rhs.real.storage.value, MPFR_RNDN)
+        mpfr_div(&result.real.mutableValue, &result.real.storage.value, &den.storage.value, MPFR_RNDN)
         
-        // result.imaginary = rhs.imaginary * tmp1
-        mpfr_mul(&result.imaginary.mutableValue, &rhs.imaginary.storage.value, &tmp.storage.value, MPFR_RNDN)
+        // result.imaginary = -lhs * d / den
+        mpfr_mul(&result.imaginary.mutableValue, &lhs.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
+        mpfr_neg(&result.imaginary.mutableValue, &result.imaginary.storage.value, MPFR_RNDN)
+        mpfr_div(&result.imaginary.mutableValue, &result.imaginary.storage.value, &den.storage.value, MPFR_RNDN)
         
         return result
     }

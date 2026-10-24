@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Synchronization
 import CMPFR
 
 
@@ -96,10 +97,17 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         case maxOfOperands
     }
     
-    /// Result precision mode for functions with 2 or more arguments
-    /// WARNING: This variable must not be set within parallel threads. This would cause a race condition!
-    nonisolated(unsafe)private static var _resultPrecision: ResultPrecision = .maxOfOperands
-    
+    /// Result precision mode for functions with 2 or more arguments.
+    /// Stored atomically, so it is visible to and safe for all threads.
+    private static let _resultPrecision = Atomic<Int>(ResultPrecision.maxOfOperands.rawValue)
+
+    /// Default precision in bits.
+    /// MPFR's own default precision (mpfr_set_default_prec) is thread-local when MPFR is built
+    /// thread-safe (Homebrew, most Linux distributions). A value set on the main thread would not be
+    /// visible in tasks running on other threads. Therefore the default precision is kept here and
+    /// always passed explicitly to mpfr_init2.
+    private static let _defaultPrecision = Atomic<Int>(53)
+
     /// Precision bits
     private var _precision: Int
 
@@ -107,19 +115,55 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     public static let detectPrecision: Int     = 0
     public static let useOtherPrecision: Int   = -1
     public static let useDefaultPrecision: Int = -2
-    
-    /// Get/set the default precision
-    public private(set) static var defaultPrecision: Int {
-        get { mpfr_get_default_prec() }
-        set { mpfr_set_default_prec(newValue) }
+
+    /// Valid precision range (MPFR_PREC_MIN ... MPFR_PREC_MAX)
+    public static let minPrecision: Int = 1
+    public static let maxPrecision: Int = Int.max - 256
+
+    /// Get the default precision (set it with setPrecisions)
+    public static var defaultPrecision: Int {
+        _defaultPrecision.load(ordering: .relaxed)
     }
-    
+
+    /// Get the current result precision mode (set it with setPrecisions)
+    public static var resultPrecision: ResultPrecision {
+        ResultPrecision(rawValue: _resultPrecision.load(ordering: .relaxed)) ?? .maxOfOperands
+    }
+
+    /// Check if a precision value is a valid number of bits (no flag)
+    @inline(__always)
+    public static func isValidPrecision(_ bits: Int) -> Bool {
+        bits >= minPrecision && bits <= maxPrecision
+    }
+
+    /// Resolve a requested precision (bits or one of the precision flags) to a number of bits
+    /// - Parameters:
+    ///   - requested: Number of bits or one of detectPrecision, useOtherPrecision, useDefaultPrecision
+    ///   - other:     Precision of a source value, used for useOtherPrecision and detectPrecision
+    /// - Returns:     Valid number of bits. Traps with a clear message if requested is invalid.
+    @inline(__always)
+    internal static func resolvePrecision(_ requested: Int, other: Int? = nil) -> Int {
+        switch requested {
+        case useDefaultPrecision:
+            return defaultPrecision
+        case useOtherPrecision, detectPrecision:
+            return other ?? defaultPrecision
+        default:
+            precondition(isValidPrecision(requested), "MPFloat: invalid precision \(requested)")
+            return requested
+        }
+    }
+
     /// Return precision
     public var precision: Int {
         get { _precision }
         set {
-            _precision = newValue
-            mpfr_prec_round(&storage.value, newValue, MPFR_RNDN)
+            let bits = MPFloat.resolvePrecision(newValue, other: _precision)
+            guard bits != _precision else { return }
+            // Use mutableValue to trigger copy on write. Rounding the shared storage would
+            // modify all copies of this value.
+            mpfr_prec_round(&mutableValue, bits, MPFR_RNDN)
+            _precision = bits
         }
     }
     
@@ -157,7 +201,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// Return result precision
     @inline(__always)
     private static func rp(_ p1: Int, _ p2: Int) -> Int {
-        switch Self._resultPrecision {
+        switch Self.resultPrecision {
         case .leftOperand:
             return p1
         case .rightOperand:
@@ -169,10 +213,13 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         }
     }
     
+    /// Set default precision and result precision mode.
+    /// Both values are stored atomically and are visible to all threads. They are global settings:
+    /// changing them while calculations are running affects all subsequent operations.
     public static func setPrecisions(defaultPrecision: Int, resultPrecision: ResultPrecision) {
-        guard Thread.isMainThread else { return }
-        Self._resultPrecision = resultPrecision
-        Self.defaultPrecision = defaultPrecision
+        precondition(isValidPrecision(defaultPrecision), "MPFloat: invalid default precision \(defaultPrecision)")
+        Self._resultPrecision.store(resultPrecision.rawValue, ordering: .relaxed)
+        Self._defaultPrecision.store(defaultPrecision, ordering: .relaxed)
     }
     
     /// Calculate required precision for numeric string
@@ -223,13 +270,42 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         return nil
     }
 
+    /// Precision required for a decimal string without loss of digits.
+    /// Combines the magnitude based estimation of getPrecision() (previous behaviour, used as lower
+    /// bound) with the number of significant digits, so that long mantissas like
+    /// "-0.743643887037158704752191506114774" are not truncated to 53 bits.
+    /// - Parameters:
+    ///   - sval:       Decimal string
+    ///   - safetyBits: Additional bits
+    /// - Returns:      Number of bits
+    public static func requiredPrecision(forDecimalString sval: String, safetyBits: Int = 8) -> Int {
+        var digits = 0
+        var leadingZeros = true
+        scan: for ch in sval.utf8 {
+            switch ch {
+            case UInt8(ascii: "0"):
+                if !leadingZeros { digits += 1 }
+            case UInt8(ascii: "1")...UInt8(ascii: "9"):
+                leadingZeros = false
+                digits += 1
+            case UInt8(ascii: "e"), UInt8(ascii: "E"), UInt8(ascii: "@"):
+                break scan
+            default:
+                continue
+            }
+        }
+        let digitBits = Int((Double(digits) * Foundation.log2(10.0)).rounded(.up)) + safetyBits
+        let magnitudeBits = getPrecision(real: sval, safetyBits: safetyBits)?.bits ?? defaultPrecision
+        return Swift.min(Swift.max(digitBits, magnitudeBits), maxPrecision)
+    }
+
     //
     // Initializers
     //
     
     /// Initialize value as NaN
     public init(precision: Int = MPFloat.defaultPrecision) {
-        _precision = precision
+        _precision = MPFloat.resolvePrecision(precision)
         storage = Storage(precision: _precision)
     }
     
@@ -248,59 +324,73 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     }
     
     /// Initialize a value with a String
+    /// If the string is not a valid number, the value is NaN. Use init?(validating:precision:)
+    /// to detect invalid strings.
     /// - Parameters:
     ///   - sval: A number as a string
     ///   - precision: Required precision / number of bits.
     public init(_ sval: String, precision: Int = MPFloat.detectPrecision) {
         if precision == MPFloat.detectPrecision {
-            if let precisionRequirements = Self.getPrecision(real: sval, safetyBits: 8) {
-                _precision = precisionRequirements.bits
-            }
-            else {
-                _precision = MPFloat.defaultPrecision
-            }
+            _precision = Self.requiredPrecision(forDecimalString: sval)
         }
         else {
-            _precision = precision
+            _precision = MPFloat.resolvePrecision(precision)
         }
         storage = Storage(precision: _precision)
-        mpfr_set_str(&mutableValue, sval, 10, MPFR_RNDN)
+        if mpfr_set_str(&storage.value, sval, 10, MPFR_RNDN) != 0 {
+            mpfr_set_nan(&storage.value)
+        }
+    }
+    
+    /// Initialize a value with a String. Returns nil if the string is not a valid number.
+    /// - Parameters:
+    ///   - sval: A number as a string. Also accepts "@NaN@", "@Inf@", "-@Inf@"
+    ///   - precision: Required precision / number of bits.
+    public init?(validating sval: String, precision: Int = MPFloat.detectPrecision) {
+        if precision == MPFloat.detectPrecision {
+            _precision = Self.requiredPrecision(forDecimalString: sval)
+        }
+        else {
+            _precision = MPFloat.resolvePrecision(precision)
+        }
+        storage = Storage(precision: _precision)
+        if mpfr_set_str(&storage.value, sval, 10, MPFR_RNDN) != 0 {
+            return nil
+        }
     }
     
     /// Initialize value with a Float
     public init(_ fval: Float, precision: Int = MPFloat.defaultPrecision) {
-        _precision = precision
+        _precision = MPFloat.resolvePrecision(precision)
         storage = Storage(precision: _precision)
-        mpfr_set_d(&mutableValue, Double(fval), MPFR_RNDN)
+        mpfr_set_flt(&storage.value, fval, MPFR_RNDN)
     }
     
     /// Initialize value with a Double
     public init(_ dval: Double, precision: Int = MPFloat.defaultPrecision) {
-        _precision = precision
+        _precision = MPFloat.resolvePrecision(precision)
         storage = Storage(precision: _precision)
-        mpfr_set_d(&mutableValue, dval, MPFR_RNDN)
+        mpfr_set_d(&storage.value, dval, MPFR_RNDN)
     }
     
-    /// Initialize value with an Int
+    /// Initialize value with an Int (exact for all Int values if precision >= 64)
     public init(_ ival: Int, precision: Int = MPFloat.defaultPrecision) {
-        _precision = precision
+        _precision = MPFloat.resolvePrecision(precision)
         storage = Storage(precision: _precision)
-        mpfr_set_d(&mutableValue, Double(ival), MPFR_RNDN)
+        mpfr_set_si(&storage.value, ival, MPFR_RNDN)
     }
     
     /// Initialize value with a MPFloat with optional precision conversion
     public init(_ other: MPFloat, precision: Int = MPFloat.useOtherPrecision) {
-        switch precision {
-        case MPFloat.useDefaultPrecision:
-            _precision = MPFloat.defaultPrecision
-        case MPFloat.useOtherPrecision:
-            _precision = other.precision
-        default:
-            _precision = precision
+        _precision = MPFloat.resolvePrecision(precision, other: other.precision)
+        if _precision == other.precision {
+            // Same precision: share storage, copy on write
+            storage = other.storage
         }
-        
-        storage = Storage(precision: _precision)
-        mpfr_set(&storage.value, &other.storage.value, MPFR_RNDN)
+        else {
+            storage = Storage(precision: _precision)
+            mpfr_set(&storage.value, &other.storage.value, MPFR_RNDN)
+        }
     }
     
     //
@@ -310,6 +400,11 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// Check for zero
     public func isZero() -> Bool {
         mpfr_zero_p(&storage.value) != 0 ? true : false
+    }
+    
+    /// Sign of the value (also for zero, infinity and NaN)
+    public var sign: FloatingPointSign {
+        mpfr_signbit(&storage.value) != 0 ? .minus : .plus
     }
     
     /// Check flag
@@ -351,57 +446,64 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     ///   - expFmt: If true (default) use exponential format for values with negativ exponent
     /// - Returns: Value as string or "NaN" on error
     public func toString(digits: Int, expFmt: Bool = true) -> String {
+        // Special values. The strings can be parsed by mpfr_set_str (lossless Codable round trip)
+        if mpfr_nan_p(&self.storage.value) != 0 {
+            return "@NaN@"
+        }
+        if mpfr_inf_p(&self.storage.value) != 0 {
+            return mpfr_signbit(&self.storage.value) != 0 ? "-@Inf@" : "@Inf@"
+        }
+        if mpfr_zero_p(&self.storage.value) != 0 {
+            return mpfr_signbit(&self.storage.value) != 0 ? "-0" : "0"
+        }
+        
         var exp: mpfr_exp_t = 0
         
         // MPFR returns digits without decimal point and exponent separately
         guard let cStr = mpfr_get_str(nil, &exp, 10, digits, &self.storage.value, MPFR_RNDN) else {
-            return "NaN"
+            return "@NaN@"
         }
         
         // Convert C-String to Swift String and free memory of C-String
         var rawDigits = String(cString: cStr)
         mpfr_free_str(cStr)
         
-        if rawDigits.isEmpty || rawDigits == "0" { return "0" }
-        
         // Extract sign
         let isNegative = rawDigits.hasPrefix("-")
         if isNegative { rawDigits.removeFirst() }
+        
+        /// Remove trailing zeros (and a trailing decimal point) of a mantissa with decimal point
+        func trimmed(_ mantissa: String) -> String {
+            guard mantissa.contains(".") else { return mantissa }
+            var m = mantissa
+            while m.last == "0" { m.removeLast() }
+            if m.last == "." { m.removeLast() }
+            return m
+        }
         
         var result = isNegative ? "-" : ""
         
         if exp > 0 && exp <= rawDigits.count {
             // Case 1: "123.45"
             let dotIndex = Int(exp)
-            result += rawDigits.prefix(dotIndex)
+            var mantissa = String(rawDigits.prefix(dotIndex))
             let suffix = rawDigits.dropFirst(dotIndex)
             if !suffix.isEmpty {
-                result += "." + suffix
+                mantissa += "." + String(suffix)
             }
+            result += trimmed(mantissa)
         } else if exp > 0 {
             // Case 2: "1234500"
             result += rawDigits
             result += String(repeating: "0", count: Int(exp) - rawDigits.count)
+        } else if expFmt {
+            // Case 3a: Very small number "1.23E-4". Trim zeros of mantissa before appending exponent
+            let mantissa = String(rawDigits.prefix(1)) + "." + String(rawDigits.dropFirst())
+            result += trimmed(mantissa) + "E" + String(exp - 1)
         } else {
-            // Case 3: Very small number "0.000123"
-            if expFmt {
-                if let firstChar = rawDigits.first {
-                    result += String(firstChar) + "."
-                    result += rawDigits.dropFirst()
-                }
-                result += "E" + String(exp - 1)
-            }
-            else {
-                result += "0."
-                result += String(repeating: "0", count: Swift.abs(Int(exp)))
-                result += rawDigits
-            }
-        }
-        
-        // Trim zeroes
-        if result.contains(".") {
-            while result.last == "0" { result.removeLast() }
-            if result.last == "." { result.removeLast() }
+            // Case 3b: Very small number "0.000123"
+            let mantissa = "0." + String(repeating: "0", count: Swift.abs(Int(exp))) + rawDigits
+            result += trimmed(mantissa)
         }
         
         return result
@@ -569,60 +671,64 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     // Comparision operators
     //
     
+    // All comparisons follow IEEE 754 semantics: any comparison involving NaN is false
+    // (except !=, which is true). mpfr_cmp must not be used here, it returns 0 for NaN operands.
+    
     /// MPFloat == MPFloat
     public static func == (lhs: MPFloat, rhs: MPFloat) -> Bool {
-        return mpfr_cmp(&lhs.storage.value, &rhs.storage.value) == 0
+        return mpfr_equal_p(&lhs.storage.value, &rhs.storage.value) != 0
     }
     
     /// MPFloat == Double
     public static func == (lhs: MPFloat, rhs: Double) -> Bool {
+        guard !lhs.isNaN && !rhs.isNaN else { return false }
         return mpfr_cmp_d(&lhs.storage.value, rhs) == 0
     }
 
     /// MPFloat != MPFloat
     public static func != (lhs: MPFloat, rhs: MPFloat) -> Bool {
-        return mpfr_cmp(&lhs.storage.value, &rhs.storage.value) != 0
+        return !(lhs == rhs)
     }
     
     /// MPFloat != Double
     public static func != (lhs: MPFloat, rhs: Double) -> Bool {
-        return mpfr_cmp_d(&lhs.storage.value, rhs) != 0
+        return !(lhs == rhs)
     }
     
     public static func < (lhs: MPFloat, rhs: MPFloat) -> Bool {
-        return mpfr_cmp(&lhs.storage.value, &rhs.storage.value) < 0
+        return mpfr_less_p(&lhs.storage.value, &rhs.storage.value) != 0
     }
     
     public static func < (lhs: MPFloat, rhs: Double) -> Bool {
+        guard !lhs.isNaN && !rhs.isNaN else { return false }
         return mpfr_cmp_d(&lhs.storage.value, rhs) < 0
     }
     
     public static func <= (lhs: MPFloat, rhs: MPFloat) -> Bool {
-        let r = mpfr_cmp(&lhs.storage.value, &rhs.storage.value)
-        return r <= 0
+        return mpfr_lessequal_p(&lhs.storage.value, &rhs.storage.value) != 0
     }
     
     public static func <= (lhs: MPFloat, rhs: Double) -> Bool {
-        let r = mpfr_cmp_d(&lhs.storage.value, rhs)
-        return r <= 0
+        guard !lhs.isNaN && !rhs.isNaN else { return false }
+        return mpfr_cmp_d(&lhs.storage.value, rhs) <= 0
     }
 
     public static func > (lhs: MPFloat, rhs: MPFloat) -> Bool {
-        return mpfr_cmp(&lhs.storage.value, &rhs.storage.value) > 0
+        return mpfr_greater_p(&lhs.storage.value, &rhs.storage.value) != 0
     }
     
     public static func > (lhs: MPFloat, rhs: Double) -> Bool {
+        guard !lhs.isNaN && !rhs.isNaN else { return false }
         return mpfr_cmp_d(&lhs.storage.value, rhs) > 0
     }
     
     public static func >= (lhs: MPFloat, rhs: MPFloat) -> Bool {
-        let r = mpfr_cmp(&lhs.storage.value, &rhs.storage.value)
-        return r >= 0
+        return mpfr_greaterequal_p(&lhs.storage.value, &rhs.storage.value) != 0
     }
     
     public static func >= (lhs: MPFloat, rhs: Double) -> Bool {
-        let r = mpfr_cmp_d(&lhs.storage.value, rhs)
-        return r >= 0
+        guard !lhs.isNaN && !rhs.isNaN else { return false }
+        return mpfr_cmp_d(&lhs.storage.value, rhs) >= 0
     }
     
     //
@@ -655,16 +761,10 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     ///   - rhs: Value 2
     /// - Returns: Maximum of lhs, rhs
     public static func max(_ lhs: MPFloat, _ rhs: MPFloat) -> MPFloat {
-        if mpfr_cmp(&lhs.storage.value, &rhs.storage.value) > 0 {
-            let result = MPFloat(precision: lhs.precision)
-            mpfr_set(&result.storage.value, &lhs.storage.value, MPFR_RNDN)
-            return result
-        }
-        else {
-            let result = MPFloat(precision: rhs.precision)
-            mpfr_set(&result.storage.value, &rhs.storage.value, MPFR_RNDN)
-            return result
-        }
+        // If one value is NaN, return the other one (IEEE maxNum). No copy: storage is shared (COW)
+        if lhs.isNaN { return rhs }
+        if rhs.isNaN { return lhs }
+        return mpfr_greater_p(&lhs.storage.value, &rhs.storage.value) != 0 ? lhs : rhs
     }
 
     /// Return minimum of two values
@@ -673,16 +773,10 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     ///   - rhs: Value 2
     /// - Returns: Minimum of lhs, rhs
     public static func min(_ lhs: MPFloat, _ rhs: MPFloat) -> MPFloat {
-        if mpfr_cmp(&lhs.storage.value, &rhs.storage.value) < 0 {
-            let result = MPFloat(precision: lhs.precision)
-            mpfr_set(&result.storage.value, &lhs.storage.value, MPFR_RNDN)
-            return result
-        }
-        else {
-            let result = MPFloat(precision: rhs.precision)
-            mpfr_set(&result.storage.value, &rhs.storage.value, MPFR_RNDN)
-            return result
-        }
+        // If one value is NaN, return the other one (IEEE minNum). No copy: storage is shared (COW)
+        if lhs.isNaN { return rhs }
+        if rhs.isNaN { return lhs }
+        return mpfr_less_p(&lhs.storage.value, &rhs.storage.value) != 0 ? lhs : rhs
     }
     
     /// Return absolute value
@@ -708,7 +802,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// nth root
     public static func root(_ x: MPFloat, _ n: Int) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_rootn_si(&result.storage.value, &result.storage.value, n, MPFR_RNDN)
+        mpfr_rootn_si(&result.storage.value, &x.storage.value, n, MPFR_RNDN)
         return result
     }
     
@@ -983,6 +1077,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// - Returns: Array of size n
     public static func linspace(_ start: Self, _ end: Self, _ n: Int) -> [Self] {
         guard n > 0 else { return [] }
+        guard n > 1 else { return [start] }
         let step = (end - start) / Self(n - 1, precision: start.precision)
         var a = Array(0..<n).map { Self($0, precision: start.precision) * step + start }
         

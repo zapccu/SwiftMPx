@@ -35,3 +35,26 @@ extension MPFloat : RealFunctions {
 ```
 
 
+
+## Performance
+
+Every arithmetic operator creates a new value, which allocates memory. For hot loops like the
+calculation of a reference orbit use the in-place functions of MPComplex with a reused scratch value.
+They do not allocate memory per iteration:
+
+```
+var z = MPComplex(0.0, 0.0, precision: 256)
+var scratch = MPFloat(precision: 256)
+for _ in 0..<maxIter {
+    z.formSquareAdd(c, scratch: &scratch)   // z = z² + c
+}
+```
+
+Complex multiplication, division, square and norm use `mpfr_fmma` / `mpfr_fmms`, which compute
+expressions like `ac - bd` with a single rounding.
+
+Benchmark (use a release build):
+
+```
+swift run -c release SwiftMPxBenchmark [iterations]
+```

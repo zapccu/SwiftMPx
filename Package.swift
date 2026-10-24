@@ -32,6 +32,11 @@ let package = Package(
             name: "SwiftMPx",
             dependencies: ["CMPFR"]
         ),
+        // Benchmark: swift run -c release SwiftMPxBenchmark [iterations]
+        .executableTarget(
+            name: "SwiftMPxBenchmark",
+            dependencies: ["SwiftMPx"]
+        ),
         .testTarget(
             name: "SwiftMPxTests",
             dependencies: ["SwiftMPx"]

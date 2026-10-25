@@ -141,12 +141,12 @@ struct ApplicationIterationTests {
     }
 
     @Test func mandelbrotStepWithSharedScratch() {
-        // Z0 = 1 + 2i, D0 = 1, c = 1 + 1i: D1 = 3 + 4i, Z1 = -2 + 6i
+        // Z0 = 1 + 2i, D0 = 1, c = 1 + 1i: D1 = 3 + 4i, Z1 = (-3 + 4i) + (1 + 1i) = -2 + 5i
         var z = c(1, 2), d = c(1, 0)
         var scratch = MPFloat(precision: p)
         d.testFormDerivativeStep(z: z, scratch: &scratch)
         z.testFormSquareAdd(c(1, 1), scratch: &scratch)
         #expect(d == c(3, 4))
-        #expect(z == c(-2, 6))
+        #expect(z == c(-2, 5))
     }
 }

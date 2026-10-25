@@ -26,7 +26,7 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
             imaginary.precision = newValue
         }
     }
-        
+            
     /// Calculate required precision
     ///
     /// - Parameters:
@@ -107,8 +107,9 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         self.real      = MPFloat(real, precision: precision)
         self.imaginary = MPFloat(imaginary, precision: precision)
     }
-    
+
     /// Initialize MPComplex with String values
+    /// If one of the Strings is not a number, the resulting value is (NaN, NaN)
     public init(_ real: String, _ imaginary: String = "0", precision: Int = MPFloat.detectPrecision) {
         var p: Int
         if precision == MPFloat.detectPrecision {
@@ -128,6 +129,11 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         
         self.real      = MPFloat(real, precision: p)
         self.imaginary = MPFloat(imaginary, precision: p)
+        
+        if self.real.isNaN || self.imaginary.isNaN {
+            self.real = MPFloat.nan
+            self.imaginary = MPFloat.nan
+        }
     }
     
     /// Initialize MPComplex with MPFloat values.
@@ -187,6 +193,11 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         MPFloat.max(self.real, self.imaginary)
     }
     
+    /// Return true if either real or imaginary part is NaN
+    public var isNaN: Bool {
+        self.real.isNaN || self.imaginary.isNaN
+    }
+    
     /// Negate MPComplex
     public static prefix func - (rhs: MPComplex) -> MPComplex {
         var result = rhs
@@ -199,14 +210,30 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     // Addition
     //
 
-    /// Addition, return new value
+    /// Addition (MPComplex, MPComplex), return new value
     public static func + (_ lhs: MPComplex, _ rhs: MPComplex) -> MPComplex {
-        var result = MPComplex(precision: lhs.precision)
+        var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
         mpfr_add(&result.real.mutableValue, &lhs.real.storage.value, &rhs.real.storage.value, MPFR_RNDN)
         mpfr_add(&result.imaginary.mutableValue, &lhs.imaginary.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
         return result
     }
     
+    /// Addition (MPComplex, MPFloat), return new value
+    public static func + (_ lhs: MPComplex, _ rhs: MPFloat) -> MPComplex {
+        var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
+        mpfr_add(&result.real.mutableValue, &lhs.real.storage.value, &rhs.storage.value, MPFR_RNDN)
+        mpfr_set(&result.imaginary.mutableValue, &lhs.imaginary.storage.value, MPFR_RNDN)
+        return result
+    }
+    
+    /// Addition (MPFloat, MPComplex), return new value
+    public static func + (_ lhs: MPFloat, _ rhs: MPComplex) -> MPComplex {
+        var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
+        mpfr_add(&result.real.mutableValue, &lhs.storage.value, &rhs.real.storage.value, MPFR_RNDN)
+        mpfr_set(&result.imaginary.mutableValue, &rhs.imaginary.storage.value, MPFR_RNDN)
+        return result
+    }
+
     /// Addition, in-place
     public static func += (lhs: inout MPComplex, rhs: MPComplex) {
         mpfr_add(&lhs.real.mutableValue, &lhs.real.storage.value, &rhs.real.storage.value, MPFR_RNDN)
@@ -217,11 +244,27 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     // Subtraction
     //
     
-    /// Subtraction, return new value
+    /// Subtraction (MPComplex, MPComplex), return new value
     public static func - (_ lhs: MPComplex, _ rhs: MPComplex) -> MPComplex {
-        var result = MPComplex(precision: lhs.precision)
+        var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
         mpfr_sub(&result.real.mutableValue, &lhs.real.storage.value, &rhs.real.storage.value, MPFR_RNDN)
         mpfr_sub(&result.imaginary.mutableValue, &lhs.imaginary.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
+        return result
+    }
+    
+    /// Subtraction (MPComplex, MPFloat), return new value
+    public static func - (_ lhs: MPComplex, _ rhs: MPFloat) -> MPComplex {
+        var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
+        mpfr_sub(&result.real.mutableValue, &lhs.real.storage.value, &rhs.storage.value, MPFR_RNDN)
+        mpfr_set(&result.imaginary.mutableValue, &lhs.imaginary.storage.value, MPFR_RNDN)
+        return result
+    }
+    
+    /// Addition (MPFloat, MPComplex), return new value
+    public static func - (_ lhs: MPFloat, _ rhs: MPComplex) -> MPComplex {
+        var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
+        mpfr_sub(&result.real.mutableValue, &lhs.storage.value, &rhs.real.storage.value, MPFR_RNDN)
+        mpfr_set(&result.imaginary.mutableValue, &rhs.imaginary.storage.value, MPFR_RNDN)
         return result
     }
     
@@ -251,7 +294,7 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     
     /// Multiplication (MPComplex, MPFloat), return new value
     public static func * (_ lhs: MPComplex, _ rhs: MPFloat) -> MPComplex {
-        var result = MPComplex(precision: lhs.precision)
+        var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
         mpfr_mul(&result.real.mutableValue, &lhs.real.storage.value, &rhs.storage.value, MPFR_RNDN)
         mpfr_mul(&result.imaginary.mutableValue, &lhs.imaginary.storage.value, &rhs.storage.value, MPFR_RNDN)
         return result
@@ -293,7 +336,7 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     /// Division: MPComplex, MPComplex
     /// (a + bi) / (c + di) = ((ac + bd) + (bc - ad)i) / (c² + d²)
     public static func / (_ lhs: MPComplex, _ rhs: MPComplex) -> MPComplex {
-        var result = MPComplex(precision: lhs.precision)
+        var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
         var den = MPFloat(precision: lhs.precision)
 
         // den = c² + d²
@@ -420,7 +463,7 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         return result
     }
     
-    /// Absolute value: sqrt(a² + b²), correctly rounded, no intermediate overflow
+    /// Absolute value / norm: sqrt(a² + b²), correctly rounded, no intermediate overflow
     public static func abs(_ value: MPComplex) -> MPFloat {
         var result = MPFloat(precision: value.precision)
         mpfr_hypot(&result.mutableValue, &value.real.storage.value, &value.imaginary.storage.value, MPFR_RNDN)

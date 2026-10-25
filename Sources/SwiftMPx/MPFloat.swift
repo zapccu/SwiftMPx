@@ -198,9 +198,13 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         return Int(mpfr_get_exp(&storage.value))
     }
     
-    /// Return result precision
+    /// Return result precision for operations with 2 operands
+    /// - Parameters:
+    ///   - p1: Precision bits of left hand side operator
+    ///   - p2: Precision bits of right hand side operator
+    /// - Returns: Precision bits of operation result
     @inline(__always)
-    private static func rp(_ p1: Int, _ p2: Int) -> Int {
+    public static func rp(_ p1: Int, _ p2: Int) -> Int {
         switch Self.resultPrecision {
         case .leftOperand:
             return p1

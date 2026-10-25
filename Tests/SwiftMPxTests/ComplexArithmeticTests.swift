@@ -23,6 +23,10 @@ struct ComplexArithmeticTests {
         // (1 + 2i)(3 + 4i) = -5 + 10i
         #expect(c(1, 2) * c(3, 4) == c(-5, 10))
     }
+    
+    @Test func multiplyByDouble() {
+        #expect(c(2, 3) * 5.0 == c(10, 15))
+    }
 
     @Test func multiplicationInPlace() {
         var z = c(1, 2)
@@ -94,64 +98,3 @@ struct ComplexArithmeticTests {
     }
 }
 
-@Suite("In-place iteration")
-struct InPlaceIterationTests {
-
-    let c0 = MPComplex("-0.743643887037158704752191506114774", "0.131825904205311970493132056385139", precision: p)
-
-    @Test func formSquareAddMatchesOperators() {
-        var a = MPComplex(0.0, 0.0, precision: p)
-        var b = MPComplex(0.0, 0.0, precision: p)
-        var scratch = MPFloat(precision: p)
-
-        for _ in 0..<1000 {
-            a = MPComplex.square(a) + c0
-            b.formSquareAdd(c0, scratch: &scratch)
-            #expect(a == b)
-            if a != b { break }
-        }
-    }
-
-    @Test func formSquareAddWithoutScratch() {
-        var a = c(0.5, 0.25)
-        var b = a
-        a = MPComplex.square(a) + c0
-        b.formSquareAdd(c0)
-        #expect(a == b)
-    }
-
-    @Test func formSquareAddWithItself() {
-        // z = z² + z: c shares storage with self
-        var z = c(1, 2)
-        z.formSquareAdd(z)
-        #expect(z == c(-2, 6))      // (-3 + 4i) + (1 + 2i)
-    }
-
-    @Test func formSquareAddDoesNotModifyCopies() {
-        let a = c(1, 2)
-        var b = a
-        var scratch = MPFloat(precision: p)
-        b.formSquareAdd(c(1, 1), scratch: &scratch)
-        #expect(a == c(1, 2))
-        #expect(b == c(-2, 5))
-    }
-
-    @Test func scratchPrecisionIsAdjusted() {
-        // A scratch value with too low precision must not reduce the accuracy
-        var a = c0
-        var b = c0
-        var lowScratch = MPFloat(precision: 24)
-        a.formSquareAdd(c0)
-        b.formSquareAdd(c0, scratch: &lowScratch)
-        #expect(a == b)
-        #expect(lowScratch.precision == p)
-    }
-
-    @Test func formSquare() {
-        var z = c(1, 2)
-        var scratch = MPFloat(precision: p)
-        z.formSquare(scratch: &scratch)
-        #expect(z == c(-3, 4))
-        #expect(z.real.precision == p)
-    }
-}

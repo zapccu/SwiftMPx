@@ -212,7 +212,7 @@ struct StringCodableTests {
         #expect(minf.sign == .minus)
 
         let mzero = try roundTrip(MPFloat(-0.0, precision: p))
-        #expect(mzero.isZero())
+        #expect(mzero.isZero)
         #expect(mzero.sign == .minus)
     }
 

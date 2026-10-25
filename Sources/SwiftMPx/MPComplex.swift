@@ -193,6 +193,11 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         MPFloat.max(self.real, self.imaginary)
     }
     
+    /// Return atan2(imaginary, real)
+    public var arg: MPFloat {
+        MPFloat.atan2(y: imaginary, x: real)
+    }
+    
     /// Return true if either real or imaginary part is NaN
     public var isNaN: Bool {
         self.real.isNaN || self.imaginary.isNaN

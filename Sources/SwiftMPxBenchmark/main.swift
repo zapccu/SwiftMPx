@@ -44,24 +44,15 @@ for p in precisions {
         return z
     }
 
-    // 3. In place with reused scratch value: no allocations per iteration
-    let t3 = measure {
-        var z = MPComplex(0.0, 0.0, precision: p)
-        var scratch = MPFloat(precision: p)
-        for _ in 0..<iterations { z.formSquareAdd(c, scratch: &scratch) }
-        return z
-    }
-
     // Sanity check: all variants must produce the same orbit end point
-    precondition(t2.result == t3.result, "formSquareAdd differs from square(z) + c")
-    precondition(!t1.result.real.isNaN && !t3.result.real.isNaN, "orbit diverged")
+    precondition(t1.result == t2.result, "z = z * z + c differs from square(z) + c")
+    precondition(!t1.result.real.isNaN && !t2.result.real.isNaN, "orbit diverged")
 
     let cols = [
         "\(p)",
         String(format: "%.3f s", t1.seconds),
         String(format: "%.3f s", t2.seconds),
-        String(format: "%.3f s", t3.seconds),
-        String(format: "%.1fx", t1.seconds / t3.seconds)
+        String(format: "%.1fx", t1.seconds / t2.seconds)
     ]
     print(cols.map { $0.padding(toLength: 15, withPad: " ", startingAt: 0) }.joined())
 }

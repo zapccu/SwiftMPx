@@ -61,6 +61,36 @@ var y: MPFloat = 2     // Convert 2 (Int) to MPFloat
 Initialize MPFloat value by Double or Int literal.
 
 
+## Calling MPFR functions directly
+
+For own optimized functions (for example in-place iterations), MPFR functions can be called with
+pointers to the MPFR values. Import the module CMPFR for the MPFR functions.
+
+* `ptr` (mpfr_srcptr): read access for input arguments. Never copies, also works for let constants.
+* `mutablePtr` (mpfr_ptr): write access for the output argument. Copy on write: if the value shares
+  its storage with copies, the storage is copied first, so the copies keep their values.
+
+```
+import CMPFR
+
+// z = z² + c, in place
+mutating func formSquareAdd(_ c: MPComplex, scratch: inout MPFloat) {
+    mpfr_fmms(scratch.mutablePtr, real.ptr, real.ptr, imaginary.ptr, imaginary.ptr, MPFR_RNDN)
+    mpfr_mul(imaginary.mutablePtr, real.ptr, imaginary.ptr, MPFR_RNDN)
+    mpfr_mul_2ui(imaginary.mutablePtr, imaginary.ptr, 1, MPFR_RNDN)
+    mpfr_add(imaginary.mutablePtr, imaginary.ptr, c.imaginary.ptr, MPFR_RNDN)
+    mpfr_add(real.mutablePtr, scratch.ptr, c.real.ptr, MPFR_RNDN)
+}
+```
+
+Rules:
+* Put `mutablePtr` before the input pointers of the same value (MPFR convention: output first).
+  Arguments are evaluated from left to right, so the inputs refer to the copied storage.
+* Never write through `ptr`.
+* Never call mpfr_set_prec, mpfr_prec_round, mpfr_clear or mpfr_init2 on these pointers: the memory is
+  allocated by SwiftMPx (MPFR custom interface). Use the `precision` property to change the precision.
+* A pointer is valid as long as the value is alive and is not modified through another access.
+
 ## Overloaded operators
 
 ### Negation

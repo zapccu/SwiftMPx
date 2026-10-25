@@ -79,7 +79,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     }
     
     /// Write access – copy if necessary
-    internal var mutableValue: mpfr_t {
+    public var mutableValue: mpfr_t {
         _read { yield storage.value }
         mutating _modify {
             if !isKnownUniquelyReferenced(&storage) {

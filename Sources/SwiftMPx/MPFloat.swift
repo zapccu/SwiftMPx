@@ -76,6 +76,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// Read access, never a copy
     public var value: mpfr_t {
         _read { yield storage.value }
+        _modify { yield &storage.value }
     }
     
     /// Write access – copy if necessary

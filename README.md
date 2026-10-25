@@ -6,6 +6,11 @@ Provide Swift wrapper classes for MPFR
 * MPFloat: Class for real numbers
 * MPComplex: Class for complex numbers
 
+How to use this package
+Conformity
+Performance
+Extend MPFloat and MPComplex
+
 ## How to use this package in your own Swift project
 
 * Install MPFR (i.e. brew install mpfr)
@@ -58,3 +63,36 @@ Benchmark (use a release build):
 ```
 swift run -c release SwiftMPxBenchmark [iterations]
 ```
+
+## Extend MPFloat and MPComplex using MPFR functions
+The internal value storage of MPFloat is accessible by using the following properties:
+ptr - Reading internal storage
+mutablePtr - Writing to internal storage
+### Example: Add two MPFloat values
+```swift
+var result = MPFloat(precision: 128)
+var a = MPFloat(5.0, precision: 128)
+var b = MPFloat(7.3, precision: 128)
+mpfr_add(result.mutablePtr, a.ptr, b.ptr, MPFR_RNDN)
+```
+
+### Example: Extend MPComplex with a Mandelbrot iteration function
+```swift
+import CMPFR
+
+extension MPComplex {
+
+    // Calculate z = z² + c in place
+    // Usage: Z.formSquareAdd(c)
+    public func formSquareAdd(_ c: MPComplex) {
+        var scratch = MPComplex(precision: self.precision)
+        
+        mpfr_fmms(scratch.mutablePtr, real.ptr, real.ptr, imaginary.ptr, imaginary.ptr, MPFR_RNDN)
+        mpfr_mul(imaginary.mutablePtr, real.ptr, imaginary.ptr, MPFR_RNDN)
+        mpfr_mul_2ui(imaginary.mutablePtr, imaginary.ptr, 1, MPFR_RNDN)
+        mpfr_add(imaginary.mutablePtr, imaginary.ptr, c.imaginary.ptr, MPFR_RNDN)
+        mpfr_add(real.mutablePtr, scratch.ptr, c.real.ptr, MPFR_RNDN)
+    }
+}
+```
+

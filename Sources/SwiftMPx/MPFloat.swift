@@ -47,22 +47,34 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     ///
     /// Class for internal storage
     ///
+    /// The MPFR value (header) and its significand (limbs) are allocated in one memory block using
+    /// the MPFR custom interface. The address of the value is therefore stable for the lifetime of
+    /// the object, and it can be passed to MPFR functions as a plain pointer, without inout
+    /// conversions (`&x.value`) and without exclusivity conflicts.
+    /// Note: values must never be passed to mpfr_set_prec, mpfr_prec_round or mpfr_clear, because the
+    /// memory is not managed by MPFR.
     internal final class Storage: @unchecked Sendable {
-        var value: mpfr_t
+        let ptr: UnsafeMutablePointer<__mpfr_struct>
         
         init(precision: Int) {
-            value = mpfr_t()
-            mpfr_init2(&value, precision)
+            let headerSize = MemoryLayout<__mpfr_struct>.stride
+            let limbSize   = Int(mpfr_custom_get_size(precision))
+            let alignment  = Swift.max(MemoryLayout<__mpfr_struct>.alignment, MemoryLayout<mp_limb_t>.alignment)
+            let raw = UnsafeMutableRawPointer.allocate(byteCount: headerSize + limbSize, alignment: alignment)
+            let limbs = raw + headerSize
+            mpfr_custom_init(limbs, precision)
+            ptr = raw.bindMemory(to: __mpfr_struct.self, capacity: 1)
+            // Kind 0 = MPFR_NAN_KIND (enum mpfr_kind_t): new values are NaN, like after mpfr_init2
+            mpfr_custom_init_set(ptr, 0, 0, precision, limbs)
         }
         
-        init(copying other: Storage) {
-            value = mpfr_t()
-            mpfr_init2(&value, mpfr_get_prec(&other.value))
-            mpfr_set(&value, &other.value, MPFR_RNDN)
+        convenience init(copying other: Storage) {
+            self.init(precision: mpfr_get_prec(other.ptr))
+            mpfr_set(ptr, other.ptr, MPFR_RNDN)
         }
         
         deinit {
-            mpfr_clear(&value)
+            UnsafeMutableRawPointer(ptr).deallocate()
         }
     }
     
@@ -70,24 +82,42 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     internal var storage: Storage
     
     //
-    // COW (Copy On Write) access
+    // Access to the MPFR value
     //
     
-    /// Read access, never a copy
-    public var value: mpfr_t {
-        _read { yield storage.value }
-        _modify { yield &storage.value }
+    /// Pointer to the MPFR value for read access (MPFR input arguments, mpfr_srcptr).
+    /// Never copies, works for let constants:
+    /// ```
+    /// mpfr_add(result.mutablePtr, a.ptr, b.ptr, MPFR_RNDN)
+    /// ```
+    /// The pointer is valid as long as this value is alive and not modified. Never write through it:
+    /// the storage may be shared with copies of this value. Use mutablePtr for results.
+    public var ptr: mpfr_srcptr {
+        UnsafePointer(storage.ptr)
     }
     
-    /// Write access – copy if necessary
-    public var mutableValue: mpfr_t {
-        _read { yield storage.value }
-        mutating _modify {
+    /// Pointer to the MPFR value for write access (MPFR output argument, mpfr_ptr).
+    /// Copy on write: if the storage is shared with other copies, it is copied first.
+    /// MPFR allows the output to be one of the inputs:
+    /// ```
+    /// mpfr_mul_2ui(x.mutablePtr, x.ptr, 1, MPFR_RNDN)
+    /// ```
+    /// Get mutablePtr before (left of) the input pointers of the same value, so that the inputs
+    /// refer to the new storage if a copy was necessary. The precision of the value must not be
+    /// changed through the pointer (no mpfr_set_prec / mpfr_prec_round).
+    public var mutablePtr: mpfr_ptr {
+        mutating get {
             if !isKnownUniquelyReferenced(&storage) {
                 storage = Storage(copying: storage)
             }
-            yield &storage.value
+            return storage.ptr
         }
+    }
+    
+    /// Copy of the MPFR value (header only, the significand is shared).
+    /// For MPFR function arguments use ptr and mutablePtr.
+    public var value: mpfr_t {
+        storage.ptr.pointee
     }
     
     /// Result precision mode
@@ -161,9 +191,11 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         set {
             let bits = MPFloat.resolvePrecision(newValue, other: _precision)
             guard bits != _precision else { return }
-            // Use mutableValue to trigger copy on write. Rounding the shared storage would
-            // modify all copies of this value.
-            mpfr_prec_round(&mutableValue, bits, MPFR_RNDN)
+            // New storage with requested precision, rounded value. Copies of this value keep the
+            // old storage (copy on write). mpfr_prec_round must not be used with custom memory.
+            let newStorage = Storage(precision: bits)
+            mpfr_set(newStorage.ptr, storage.ptr, MPFR_RNDN)
+            storage = newStorage
             _precision = bits
         }
     }
@@ -176,27 +208,27 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// Not a number
     public static var nan: MPFloat {
         let result = MPFloat()
-        mpfr_set_nan(&result.storage.value)
+        mpfr_set_nan(result.storage.ptr)
         return result
     }
     
     /// Check for not a number
     public var isNaN: Bool {
-        mpfr_nan_p(&storage.value) != 0
+        mpfr_nan_p(storage.ptr) != 0
     }
     
     /// Check for infinite number
     public var isInfinite: Bool {
-        mpfr_inf_p(&storage.value) != 0
+        mpfr_inf_p(storage.ptr) != 0
     }
     
     /// Return exponent
     public var exponent: Int {
-        guard mpfr_regular_p(&storage.value) != 0 else {
+        guard mpfr_regular_p(storage.ptr) != 0 else {
             // 0, Inf or NaN - no valid exponent
             return 0
         }
-        return Int(mpfr_get_exp(&storage.value))
+        return Int(mpfr_get_exp(storage.ptr))
     }
     
     /// Return result precision for operations with 2 operands
@@ -318,14 +350,14 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     public init(floatLiteral value: Double) {
         _precision = MPFloat.defaultPrecision
         storage = Storage(precision: _precision)
-        mpfr_set_d(&storage.value, value, MPFR_RNDN)
+        mpfr_set_d(storage.ptr, value, MPFR_RNDN)
     }
     
     /// Initialize by assigning an Int value
     public init(integerLiteral value: Int) {
         _precision = MPFloat.defaultPrecision
         storage = Storage(precision: _precision)
-        mpfr_set_si(&storage.value, value, MPFR_RNDN)
+        mpfr_set_si(storage.ptr, value, MPFR_RNDN)
     }
     
     /// Initialize a value with a String
@@ -342,8 +374,8 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
             _precision = MPFloat.resolvePrecision(precision)
         }
         storage = Storage(precision: _precision)
-        if mpfr_set_str(&storage.value, sval, 10, MPFR_RNDN) != 0 {
-            mpfr_set_nan(&storage.value)
+        if mpfr_set_str(storage.ptr, sval, 10, MPFR_RNDN) != 0 {
+            mpfr_set_nan(storage.ptr)
         }
     }
     
@@ -359,7 +391,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
             _precision = MPFloat.resolvePrecision(precision)
         }
         storage = Storage(precision: _precision)
-        if mpfr_set_str(&storage.value, sval, 10, MPFR_RNDN) != 0 {
+        if mpfr_set_str(storage.ptr, sval, 10, MPFR_RNDN) != 0 {
             return nil
         }
     }
@@ -368,21 +400,21 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     public init(_ fval: Float, precision: Int = MPFloat.defaultPrecision) {
         _precision = MPFloat.resolvePrecision(precision)
         storage = Storage(precision: _precision)
-        mpfr_set_flt(&storage.value, fval, MPFR_RNDN)
+        mpfr_set_flt(storage.ptr, fval, MPFR_RNDN)
     }
     
     /// Initialize value with a Double
     public init(_ dval: Double, precision: Int = MPFloat.defaultPrecision) {
         _precision = MPFloat.resolvePrecision(precision)
         storage = Storage(precision: _precision)
-        mpfr_set_d(&storage.value, dval, MPFR_RNDN)
+        mpfr_set_d(storage.ptr, dval, MPFR_RNDN)
     }
     
     /// Initialize value with an Int (exact for all Int values if precision >= 64)
     public init(_ ival: Int, precision: Int = MPFloat.defaultPrecision) {
         _precision = MPFloat.resolvePrecision(precision)
         storage = Storage(precision: _precision)
-        mpfr_set_si(&storage.value, ival, MPFR_RNDN)
+        mpfr_set_si(storage.ptr, ival, MPFR_RNDN)
     }
     
     /// Initialize value with a MPFloat with optional precision conversion
@@ -394,7 +426,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         }
         else {
             storage = Storage(precision: _precision)
-            mpfr_set(&storage.value, &other.storage.value, MPFR_RNDN)
+            mpfr_set(storage.ptr, other.storage.ptr, MPFR_RNDN)
         }
     }
     
@@ -404,12 +436,12 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     
     /// Check for zero
     public var isZero: Bool {
-        mpfr_zero_p(&storage.value) != 0 ? true : false
+        mpfr_zero_p(storage.ptr) != 0 ? true : false
     }
     
     /// Sign of the value (also for zero, infinity and NaN)
     public var sign: FloatingPointSign {
-        mpfr_signbit(&storage.value) != 0 ? .minus : .plus
+        mpfr_signbit(storage.ptr) != 0 ? .minus : .plus
     }
     
     /// Check flag
@@ -442,7 +474,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// Convert value to Double
     /// - Returns: Double value
     public func toDouble() -> Double {
-        return mpfr_get_d(&self.storage.value, MPFR_RNDN)
+        return mpfr_get_d(self.storage.ptr, MPFR_RNDN)
     }
 
     /// Convert value to String
@@ -452,20 +484,20 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// - Returns: Value as string or "NaN" on error
     public func toString(digits: Int, expFmt: Bool = true) -> String {
         // Special values. The strings can be parsed by mpfr_set_str (lossless Codable round trip)
-        if mpfr_nan_p(&self.storage.value) != 0 {
+        if mpfr_nan_p(self.storage.ptr) != 0 {
             return "@NaN@"
         }
-        if mpfr_inf_p(&self.storage.value) != 0 {
-            return mpfr_signbit(&self.storage.value) != 0 ? "-@Inf@" : "@Inf@"
+        if mpfr_inf_p(self.storage.ptr) != 0 {
+            return mpfr_signbit(self.storage.ptr) != 0 ? "-@Inf@" : "@Inf@"
         }
-        if mpfr_zero_p(&self.storage.value) != 0 {
-            return mpfr_signbit(&self.storage.value) != 0 ? "-0" : "0"
+        if mpfr_zero_p(self.storage.ptr) != 0 {
+            return mpfr_signbit(self.storage.ptr) != 0 ? "-0" : "0"
         }
         
         var exp: mpfr_exp_t = 0
         
         // MPFR returns digits without decimal point and exponent separately
-        guard let cStr = mpfr_get_str(nil, &exp, 10, digits, &self.storage.value, MPFR_RNDN) else {
+        guard let cStr = mpfr_get_str(nil, &exp, 10, digits, self.storage.ptr, MPFR_RNDN) else {
             return "@NaN@"
         }
         
@@ -528,7 +560,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// Negate MPFloat
     public static prefix func - (rhs: MPFloat) -> MPFloat {
         var result = rhs
-        mpfr_neg(&result.mutableValue, &result.storage.value, MPFR_RNDN)
+        mpfr_neg(result.mutablePtr, result.storage.ptr, MPFR_RNDN)
         return result
     }
     
@@ -539,32 +571,32 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// Addition: MPFloat + MPFloat, precision = lhs.precision
     public static func + (_ lhs: MPFloat, _ rhs: MPFloat) -> MPFloat {
         let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
-        mpfr_add(&result.storage.value, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
+        mpfr_add(result.storage.ptr, lhs.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Addition: MPFloat + Double
     public static func + (_ lhs: MPFloat, _ rhs: Double) -> MPFloat {
         let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
-        mpfr_add_d(&result.storage.value, &lhs.storage.value, rhs, MPFR_RNDN)
+        mpfr_add_d(result.storage.ptr, lhs.storage.ptr, rhs, MPFR_RNDN)
         return result
     }
     
     /// Addition: Double + MPFloat
     public static func + (_ lhs: Double, _ rhs: MPFloat) -> MPFloat {
         let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
-        mpfr_add_d(&result.storage.value, &rhs.storage.value, lhs, MPFR_RNDN)
+        mpfr_add_d(result.storage.ptr, rhs.storage.ptr, lhs, MPFR_RNDN)
         return result
     }
     
     /// Addition (in place): MPFloat += MPFloat
     public static func += (lhs: inout MPFloat, rhs: MPFloat) {
-        mpfr_add(&lhs.mutableValue, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
+        mpfr_add(lhs.mutablePtr, lhs.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
     }
     
     /// Addition (in place): MPFloat += Double
     public static func += (lhs: inout MPFloat, rhs: Double) {
-        mpfr_add_d(&lhs.mutableValue, &lhs.storage.value, rhs, MPFR_RNDN)
+        mpfr_add_d(lhs.mutablePtr, lhs.storage.ptr, rhs, MPFR_RNDN)
     }
     
     //
@@ -574,32 +606,32 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// Subtraction: MPFloat - MPFloat
     public static func - (_ lhs: MPFloat, _ rhs: MPFloat) -> MPFloat {
         let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
-        mpfr_sub(&result.storage.value, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
+        mpfr_sub(result.storage.ptr, lhs.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Subtraction: MPFloat - Double
     public static func - (_ lhs: MPFloat, _ rhs: Double) -> MPFloat {
         let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
-        mpfr_sub_d(&result.storage.value, &lhs.storage.value, rhs, MPFR_RNDN)
+        mpfr_sub_d(result.storage.ptr, lhs.storage.ptr, rhs, MPFR_RNDN)
         return result
     }
     
     /// Subtraction: Double - MPFloat
     public static func - (_ lhs: Double, _ rhs: MPFloat) -> MPFloat {
         let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
-        mpfr_d_sub(&result.storage.value, lhs, &rhs.storage.value, MPFR_RNDN)
+        mpfr_d_sub(result.storage.ptr, lhs, rhs.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Subtraction (in place): MPFloat -= MPFloat
     public static func -= (lhs: inout MPFloat, rhs: MPFloat) {
-        mpfr_sub(&lhs.mutableValue, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
+        mpfr_sub(lhs.mutablePtr, lhs.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
     }
     
     /// Subtraction (in place): MPFloat -= Double
     public static func -= (lhs: inout MPFloat, rhs: Double) {
-        mpfr_sub_d(&lhs.mutableValue, &lhs.storage.value, rhs, MPFR_RNDN)
+        mpfr_sub_d(lhs.mutablePtr, lhs.storage.ptr, rhs, MPFR_RNDN)
     }
 
     //
@@ -609,32 +641,32 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// Multiplication: MPFloat * MPFloat
     public static func * (_ lhs: MPFloat, _ rhs: MPFloat) -> MPFloat {
         let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
-        mpfr_mul(&result.storage.value, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
+        mpfr_mul(result.storage.ptr, lhs.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Multiplication: MPFloat * Double
     public static func * (_ lhs: MPFloat, _ rhs: Double) -> MPFloat {
         let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
-        mpfr_mul_d(&result.storage.value, &lhs.storage.value, rhs, MPFR_RNDN)
+        mpfr_mul_d(result.storage.ptr, lhs.storage.ptr, rhs, MPFR_RNDN)
         return result
     }
     
     /// Multiplication: Double * MPFloat
     public static func * (_ lhs: Double, _ rhs: MPFloat) -> MPFloat {
         let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
-        mpfr_mul_d(&result.storage.value, &rhs.storage.value, lhs, MPFR_RNDN)
+        mpfr_mul_d(result.storage.ptr, rhs.storage.ptr, lhs, MPFR_RNDN)
         return result
     }
     
     /// Inplace multiplication: MPFloat *= MPFloat
     public static func *= (_ lhs: inout MPFloat, _ rhs: MPFloat) {
-        mpfr_mul(&lhs.mutableValue, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
+        mpfr_mul(lhs.mutablePtr, lhs.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
     }
     
     /// Inplace multiplication: MPFloat *= Double
     public static func *= (_ lhs: inout MPFloat, _ rhs: Double) {
-        mpfr_mul_d(&lhs.mutableValue, &lhs.storage.value, rhs, MPFR_RNDN)
+        mpfr_mul_d(lhs.mutablePtr, lhs.storage.ptr, rhs, MPFR_RNDN)
     }
 
     //
@@ -644,32 +676,32 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// Divison: MPFloat / MPFloat
     public static func / (_ lhs: MPFloat, _ rhs: MPFloat) -> MPFloat {
         let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
-        mpfr_div(&result.storage.value, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
+        mpfr_div(result.storage.ptr, lhs.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Divison: MPFloat / Double
     public static func / (_ lhs: MPFloat, _ rhs: Double) -> MPFloat {
         let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
-        mpfr_div_d(&result.storage.value, &lhs.storage.value, rhs, MPFR_RNDN)
+        mpfr_div_d(result.storage.ptr, lhs.storage.ptr, rhs, MPFR_RNDN)
         return result
     }
     
     /// Division: Double / MPFloat
     public static func / (_ lhs: Double, _ rhs: MPFloat) -> MPFloat {
         let result = MPFloat(precision: rp(lhs.precision, rhs.precision))
-        mpfr_d_div(&result.storage.value, lhs, &rhs.storage.value, MPFR_RNDN)
+        mpfr_d_div(result.storage.ptr, lhs, rhs.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Division: in-place MPFloat /= MPFloat
     public static func /= (_ lhs: inout MPFloat, _ rhs: MPFloat) {
-        mpfr_div(&lhs.mutableValue, &lhs.storage.value, &rhs.storage.value, MPFR_RNDN)
+        mpfr_div(lhs.mutablePtr, lhs.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
     }
     
     /// Division: in-place MPFloat /= Double
     public static func /= (_ lhs: inout MPFloat, _ rhs: Double) {
-        mpfr_div_d(&lhs.mutableValue, &lhs.storage.value, rhs, MPFR_RNDN)
+        mpfr_div_d(lhs.mutablePtr, lhs.storage.ptr, rhs, MPFR_RNDN)
     }
     
     //
@@ -681,13 +713,13 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     
     /// MPFloat == MPFloat
     public static func == (lhs: MPFloat, rhs: MPFloat) -> Bool {
-        return mpfr_equal_p(&lhs.storage.value, &rhs.storage.value) != 0
+        return mpfr_equal_p(lhs.storage.ptr, rhs.storage.ptr) != 0
     }
     
     /// MPFloat == Double
     public static func == (lhs: MPFloat, rhs: Double) -> Bool {
         guard !lhs.isNaN && !rhs.isNaN else { return false }
-        return mpfr_cmp_d(&lhs.storage.value, rhs) == 0
+        return mpfr_cmp_d(lhs.storage.ptr, rhs) == 0
     }
 
     /// MPFloat != MPFloat
@@ -701,39 +733,39 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     }
     
     public static func < (lhs: MPFloat, rhs: MPFloat) -> Bool {
-        return mpfr_less_p(&lhs.storage.value, &rhs.storage.value) != 0
+        return mpfr_less_p(lhs.storage.ptr, rhs.storage.ptr) != 0
     }
     
     public static func < (lhs: MPFloat, rhs: Double) -> Bool {
         guard !lhs.isNaN && !rhs.isNaN else { return false }
-        return mpfr_cmp_d(&lhs.storage.value, rhs) < 0
+        return mpfr_cmp_d(lhs.storage.ptr, rhs) < 0
     }
     
     public static func <= (lhs: MPFloat, rhs: MPFloat) -> Bool {
-        return mpfr_lessequal_p(&lhs.storage.value, &rhs.storage.value) != 0
+        return mpfr_lessequal_p(lhs.storage.ptr, rhs.storage.ptr) != 0
     }
     
     public static func <= (lhs: MPFloat, rhs: Double) -> Bool {
         guard !lhs.isNaN && !rhs.isNaN else { return false }
-        return mpfr_cmp_d(&lhs.storage.value, rhs) <= 0
+        return mpfr_cmp_d(lhs.storage.ptr, rhs) <= 0
     }
 
     public static func > (lhs: MPFloat, rhs: MPFloat) -> Bool {
-        return mpfr_greater_p(&lhs.storage.value, &rhs.storage.value) != 0
+        return mpfr_greater_p(lhs.storage.ptr, rhs.storage.ptr) != 0
     }
     
     public static func > (lhs: MPFloat, rhs: Double) -> Bool {
         guard !lhs.isNaN && !rhs.isNaN else { return false }
-        return mpfr_cmp_d(&lhs.storage.value, rhs) > 0
+        return mpfr_cmp_d(lhs.storage.ptr, rhs) > 0
     }
     
     public static func >= (lhs: MPFloat, rhs: MPFloat) -> Bool {
-        return mpfr_greaterequal_p(&lhs.storage.value, &rhs.storage.value) != 0
+        return mpfr_greaterequal_p(lhs.storage.ptr, rhs.storage.ptr) != 0
     }
     
     public static func >= (lhs: MPFloat, rhs: Double) -> Bool {
         guard !lhs.isNaN && !rhs.isNaN else { return false }
-        return mpfr_cmp_d(&lhs.storage.value, rhs) >= 0
+        return mpfr_cmp_d(lhs.storage.ptr, rhs) >= 0
     }
     
     //
@@ -744,7 +776,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     @inline(__always)
     public static func PI(precision: Int = useDefaultPrecision) -> MPFloat {
         let result = MPFloat(precision: precision == useDefaultPrecision ? Self.defaultPrecision : precision)
-        mpfr_const_pi(&result.storage.value, MPFR_RNDN)
+        mpfr_const_pi(result.storage.ptr, MPFR_RNDN)
         return result
     }
 
@@ -752,7 +784,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     @inline(__always)
     public static func LOG2(precision: Int = useDefaultPrecision) -> MPFloat {
         let result = MPFloat(precision: precision == useDefaultPrecision ? Self.defaultPrecision : precision)
-        mpfr_const_log2(&result.storage.value, MPFR_RNDN)
+        mpfr_const_log2(result.storage.ptr, MPFR_RNDN)
         return result
     }
     
@@ -769,7 +801,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         // If one value is NaN, return the other one (IEEE maxNum). No copy: storage is shared (COW)
         if lhs.isNaN { return rhs }
         if rhs.isNaN { return lhs }
-        return mpfr_greater_p(&lhs.storage.value, &rhs.storage.value) != 0 ? lhs : rhs
+        return mpfr_greater_p(lhs.storage.ptr, rhs.storage.ptr) != 0 ? lhs : rhs
     }
 
     /// Return minimum of two values
@@ -781,7 +813,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         // If one value is NaN, return the other one (IEEE minNum). No copy: storage is shared (COW)
         if lhs.isNaN { return rhs }
         if rhs.isNaN { return lhs }
-        return mpfr_less_p(&lhs.storage.value, &rhs.storage.value) != 0 ? lhs : rhs
+        return mpfr_less_p(lhs.storage.ptr, rhs.storage.ptr) != 0 ? lhs : rhs
     }
     
     /// Return absolute value
@@ -789,7 +821,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// - Returns: absolute value
     public static func abs(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_abs(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_abs(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
@@ -800,56 +832,56 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// Square root
     public static func sqrt(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_sqrt(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_sqrt(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
 
     /// nth root
     public static func root(_ x: MPFloat, _ n: Int) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_rootn_si(&result.storage.value, &x.storage.value, n, MPFR_RNDN)
+        mpfr_rootn_si(result.storage.ptr, x.storage.ptr, n, MPFR_RNDN)
         return result
     }
     
     /// Square
     public static func square(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_sqr(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_sqr(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Multiplication by 2
     public static func mul2(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_mul_2ui(&result.storage.value, &x.storage.value, 1, MPFR_RNDN)
+        mpfr_mul_2ui(result.storage.ptr, x.storage.ptr, 1, MPFR_RNDN)
         return result
     }
     
     /// Calculate x * y + z
     public static func fma(_ x: MPFloat, _ y: MPFloat, _ z: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_fma(&result.storage.value, &x.storage.value, &y.storage.value, &z.storage.value, MPFR_RNDN)
+        mpfr_fma(result.storage.ptr, x.storage.ptr, y.storage.ptr, z.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Floating point modulo division
     public static func fmod(_ x: MPFloat, _ y: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_fmod(&result.storage.value, &x.storage.value, &y.storage.value, MPFR_RNDN)
+        mpfr_fmod(result.storage.ptr, x.storage.ptr, y.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Power: MPFloat ^ MPFloat
     public static func pow(_ x: MPFloat, _ y: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_pow(&result.storage.value, &x.storage.value, &y.storage.value, MPFR_RNDN)
+        mpfr_pow(result.storage.ptr, x.storage.ptr, y.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Power: MPFloat ^ Uint
     public static func pow(_ x: MPFloat, _ y: Int) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_pow_si(&result.storage.value, &x.storage.value, y, MPFR_RNDN)
+        mpfr_pow_si(result.storage.ptr, x.storage.ptr, y, MPFR_RNDN)
         return result
     }
     
@@ -860,7 +892,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// Logarithm
     public static func log(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_log(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_log(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
@@ -868,47 +900,47 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// As we are calculating with arbitrary precision, we can simply use log(x)
     public static func log(onePlus x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_log1p(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_log1p(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
 
     /// Logarithm with base 2
     public static func log2(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_log2(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_log2(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Logarithm with base 10
     public static func log10(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_log10(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_log10(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
 
     /// Exponential function
     public static func exp(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_exp(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_exp(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
     public static func exp2(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_exp2(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_exp2(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
     public static func exp10(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_exp10(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_exp10(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Exponential function minus 1: exp(x) - 1
     public static func expMinusOne(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_expm1(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_expm1(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
@@ -919,21 +951,21 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// Sine
     public static func sin(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_sin(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_sin(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
 
     /// Cosine
     public static func cos(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_cos(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_cos(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
 
     /// Tangent
     public static func tan(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_tan(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_tan(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
@@ -941,70 +973,70 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// positive real axis, measured in radians.
     public static func atan2(y: MPFloat, x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_atan2(&result.storage.value, &y.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_atan2(result.storage.ptr, y.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Inverse sine
     public static func asin(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_asin(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_asin(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Inverse cosine
     public static func acos(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_acos(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_acos(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Inverse tangent
     public static func atan(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_atan(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_atan(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Hyperbolic sine
     public static func sinh(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_sinh(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_sinh(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Hyperbolic cosine
     public static func cosh(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_cosh(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_cosh(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Hyperbolic tangent
     public static func tanh(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_tanh(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_tanh(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Inverse hyperbolic sine
     public static func asinh(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_asinh(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_asinh(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Inverse hyperbolic cosine
     public static func acosh(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_acosh(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_acosh(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Inverse hyperbolic tangent
     public static func atanh(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_atanh(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_atanh(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
@@ -1015,14 +1047,14 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// Error function
     public static func erf(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_erf(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_erf(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Complementary error function
     public static func erfc(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_erfc(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_erfc(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
@@ -1033,14 +1065,14 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// Gamma correction
     public static func gamma(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_gamma(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_gamma(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Logarithm of absolute value of gamma
     public static func logGamma(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_lngamma(&result.storage.value, &x.storage.value, MPFR_RNDN)
+        mpfr_lngamma(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
         return result
     }
     
@@ -1048,7 +1080,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     public static func signGamma(_ x: MPFloat) -> FloatingPointSign {
         let result = MPFloat(precision: x.precision)
         var sign: Int32 = 0
-        mpfr_lgamma(&result.storage.value, &sign, &x.storage.value, MPFR_RNDN)
+        mpfr_lgamma(result.storage.ptr, &sign, x.storage.ptr, MPFR_RNDN)
         return sign == 1 ? .plus : .minus
     }
     
@@ -1112,7 +1144,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     
     public static func hypot(_ x: MPFloat, _ y: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
-        mpfr_hypot(&result.storage.value, &x.storage.value, &y.storage.value, MPFR_RNDN)
+        mpfr_hypot(result.storage.ptr, x.storage.ptr, y.storage.ptr, MPFR_RNDN)
         return result
     }
     

@@ -201,8 +201,8 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     /// Negate MPComplex
     public static prefix func - (rhs: MPComplex) -> MPComplex {
         var result = rhs
-        mpfr_neg(&result.real.mutableValue, &rhs.real.storage.value, MPFR_RNDN)
-        mpfr_neg(&result.imaginary.mutableValue, &rhs.imaginary.storage.value, MPFR_RNDN)
+        mpfr_neg(result.real.mutablePtr, rhs.real.storage.ptr, MPFR_RNDN)
+        mpfr_neg(result.imaginary.mutablePtr, rhs.imaginary.storage.ptr, MPFR_RNDN)
         return result
     }
     
@@ -213,31 +213,31 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     /// Addition (MPComplex, MPComplex), return new value
     public static func + (_ lhs: MPComplex, _ rhs: MPComplex) -> MPComplex {
         var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
-        mpfr_add(&result.real.mutableValue, &lhs.real.storage.value, &rhs.real.storage.value, MPFR_RNDN)
-        mpfr_add(&result.imaginary.mutableValue, &lhs.imaginary.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
+        mpfr_add(result.real.mutablePtr, lhs.real.storage.ptr, rhs.real.storage.ptr, MPFR_RNDN)
+        mpfr_add(result.imaginary.mutablePtr, lhs.imaginary.storage.ptr, rhs.imaginary.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Addition (MPComplex, MPFloat), return new value
     public static func + (_ lhs: MPComplex, _ rhs: MPFloat) -> MPComplex {
         var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
-        mpfr_add(&result.real.mutableValue, &lhs.real.storage.value, &rhs.storage.value, MPFR_RNDN)
-        mpfr_set(&result.imaginary.mutableValue, &lhs.imaginary.storage.value, MPFR_RNDN)
+        mpfr_add(result.real.mutablePtr, lhs.real.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
+        mpfr_set(result.imaginary.mutablePtr, lhs.imaginary.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Addition (MPFloat, MPComplex), return new value
     public static func + (_ lhs: MPFloat, _ rhs: MPComplex) -> MPComplex {
         var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
-        mpfr_add(&result.real.mutableValue, &lhs.storage.value, &rhs.real.storage.value, MPFR_RNDN)
-        mpfr_set(&result.imaginary.mutableValue, &rhs.imaginary.storage.value, MPFR_RNDN)
+        mpfr_add(result.real.mutablePtr, lhs.storage.ptr, rhs.real.storage.ptr, MPFR_RNDN)
+        mpfr_set(result.imaginary.mutablePtr, rhs.imaginary.storage.ptr, MPFR_RNDN)
         return result
     }
 
     /// Addition, in-place
     public static func += (lhs: inout MPComplex, rhs: MPComplex) {
-        mpfr_add(&lhs.real.mutableValue, &lhs.real.storage.value, &rhs.real.storage.value, MPFR_RNDN)
-        mpfr_add(&lhs.imaginary.mutableValue, &lhs.imaginary.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
+        mpfr_add(lhs.real.mutablePtr, lhs.real.storage.ptr, rhs.real.storage.ptr, MPFR_RNDN)
+        mpfr_add(lhs.imaginary.mutablePtr, lhs.imaginary.storage.ptr, rhs.imaginary.storage.ptr, MPFR_RNDN)
     }
     
     //
@@ -247,31 +247,32 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     /// Subtraction (MPComplex, MPComplex), return new value
     public static func - (_ lhs: MPComplex, _ rhs: MPComplex) -> MPComplex {
         var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
-        mpfr_sub(&result.real.mutableValue, &lhs.real.storage.value, &rhs.real.storage.value, MPFR_RNDN)
-        mpfr_sub(&result.imaginary.mutableValue, &lhs.imaginary.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
+        mpfr_sub(result.real.mutablePtr, lhs.real.storage.ptr, rhs.real.storage.ptr, MPFR_RNDN)
+        mpfr_sub(result.imaginary.mutablePtr, lhs.imaginary.storage.ptr, rhs.imaginary.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Subtraction (MPComplex, MPFloat), return new value
     public static func - (_ lhs: MPComplex, _ rhs: MPFloat) -> MPComplex {
         var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
-        mpfr_sub(&result.real.mutableValue, &lhs.real.storage.value, &rhs.storage.value, MPFR_RNDN)
-        mpfr_set(&result.imaginary.mutableValue, &lhs.imaginary.storage.value, MPFR_RNDN)
+        mpfr_sub(result.real.mutablePtr, lhs.real.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
+        mpfr_set(result.imaginary.mutablePtr, lhs.imaginary.storage.ptr, MPFR_RNDN)
         return result
     }
     
-    /// Addition (MPFloat, MPComplex), return new value
+    /// Subtraction (MPFloat, MPComplex), return new value
+    /// a - (c + di) = (a - c) - di
     public static func - (_ lhs: MPFloat, _ rhs: MPComplex) -> MPComplex {
         var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
-        mpfr_sub(&result.real.mutableValue, &lhs.storage.value, &rhs.real.storage.value, MPFR_RNDN)
-        mpfr_set(&result.imaginary.mutableValue, &rhs.imaginary.storage.value, MPFR_RNDN)
+        mpfr_sub(result.real.mutablePtr, lhs.storage.ptr, rhs.real.storage.ptr, MPFR_RNDN)
+        mpfr_neg(result.imaginary.mutablePtr, rhs.imaginary.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Subtraction, in-place
     public static func -= (lhs: inout MPComplex, rhs: MPComplex) {
-        mpfr_sub(&lhs.real.mutableValue, &lhs.real.storage.value, &rhs.real.storage.value, MPFR_RNDN)
-        mpfr_sub(&lhs.imaginary.mutableValue, &lhs.imaginary.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
+        mpfr_sub(lhs.real.mutablePtr, lhs.real.storage.ptr, rhs.real.storage.ptr, MPFR_RNDN)
+        mpfr_sub(lhs.imaginary.mutablePtr, lhs.imaginary.storage.ptr, rhs.imaginary.storage.ptr, MPFR_RNDN)
     }
     
     //
@@ -283,28 +284,28 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     /// mpfr_fmms / mpfr_fmma compute both parts with a single rounding and without temporaries.
     public static func * (_ lhs: MPComplex, _ rhs: MPComplex) -> MPComplex {
         var result = MPComplex(precision: lhs.precision)
-        mpfr_fmms(&result.real.mutableValue,
-                  &lhs.real.storage.value, &rhs.real.storage.value,
-                  &lhs.imaginary.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
-        mpfr_fmma(&result.imaginary.mutableValue,
-                  &lhs.real.storage.value, &rhs.imaginary.storage.value,
-                  &lhs.imaginary.storage.value, &rhs.real.storage.value, MPFR_RNDN)
+        mpfr_fmms(result.real.mutablePtr,
+                  lhs.real.storage.ptr, rhs.real.storage.ptr,
+                  lhs.imaginary.storage.ptr, rhs.imaginary.storage.ptr, MPFR_RNDN)
+        mpfr_fmma(result.imaginary.mutablePtr,
+                  lhs.real.storage.ptr, rhs.imaginary.storage.ptr,
+                  lhs.imaginary.storage.ptr, rhs.real.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Multiplication (MPComplex, MPFloat), return new value
     public static func * (_ lhs: MPComplex, _ rhs: MPFloat) -> MPComplex {
         var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
-        mpfr_mul(&result.real.mutableValue, &lhs.real.storage.value, &rhs.storage.value, MPFR_RNDN)
-        mpfr_mul(&result.imaginary.mutableValue, &lhs.imaginary.storage.value, &rhs.storage.value, MPFR_RNDN)
+        mpfr_mul(result.real.mutablePtr, lhs.real.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
+        mpfr_mul(result.imaginary.mutablePtr, lhs.imaginary.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Multiplication (MPFloat, MPComplex), return new value
     public static func * (_ lhs: MPFloat, _ rhs: MPComplex) -> MPComplex {
         var result = MPComplex(precision: rhs.precision)
-        mpfr_mul(&result.real.mutableValue, &lhs.storage.value, &rhs.real.storage.value, MPFR_RNDN)
-        mpfr_mul(&result.imaginary.mutableValue, &lhs.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
+        mpfr_mul(result.real.mutablePtr, lhs.storage.ptr, rhs.real.storage.ptr, MPFR_RNDN)
+        mpfr_mul(result.imaginary.mutablePtr, lhs.storage.ptr, rhs.imaginary.storage.ptr, MPFR_RNDN)
         return result
     }
     
@@ -314,19 +315,19 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         // The imaginary part can be computed in place (MPFR allows aliasing of output and inputs).
         // If rhs shares storage with lhs (z *= z), copy on write keeps rhs unchanged.
         var re = MPFloat(precision: lhs.precision)
-        mpfr_fmms(&re.mutableValue,
-                  &lhs.real.storage.value, &rhs.real.storage.value,
-                  &lhs.imaginary.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
-        mpfr_fmma(&lhs.imaginary.mutableValue,
-                  &lhs.real.storage.value, &rhs.imaginary.storage.value,
-                  &lhs.imaginary.storage.value, &rhs.real.storage.value, MPFR_RNDN)
+        mpfr_fmms(re.mutablePtr,
+                  lhs.real.storage.ptr, rhs.real.storage.ptr,
+                  lhs.imaginary.storage.ptr, rhs.imaginary.storage.ptr, MPFR_RNDN)
+        mpfr_fmma(lhs.imaginary.mutablePtr,
+                  lhs.real.storage.ptr, rhs.imaginary.storage.ptr,
+                  lhs.imaginary.storage.ptr, rhs.real.storage.ptr, MPFR_RNDN)
         lhs.real = re
     }
     
     /// Multiplication (in place)
     public static func *= (lhs: inout MPComplex, rhs: MPFloat) {
-        mpfr_mul(&lhs.real.mutableValue, &lhs.real.storage.value, &rhs.storage.value, MPFR_RNDN)
-        mpfr_mul(&lhs.imaginary.mutableValue, &lhs.imaginary.storage.value, &rhs.storage.value, MPFR_RNDN)
+        mpfr_mul(lhs.real.mutablePtr, lhs.real.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
+        mpfr_mul(lhs.imaginary.mutablePtr, lhs.imaginary.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
     }
 
     //
@@ -337,23 +338,23 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     /// (a + bi) / (c + di) = ((ac + bd) + (bc - ad)i) / (c² + d²)
     public static func / (_ lhs: MPComplex, _ rhs: MPComplex) -> MPComplex {
         var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
-        var den = MPFloat(precision: lhs.precision)
+        var den = MPFloat(precision: result.precision)
 
         // den = c² + d²
-        mpfr_fmma(&den.mutableValue, &rhs.real.storage.value, &rhs.real.storage.value,
-                  &rhs.imaginary.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
+        mpfr_fmma(den.mutablePtr, rhs.real.storage.ptr, rhs.real.storage.ptr,
+                  rhs.imaginary.storage.ptr, rhs.imaginary.storage.ptr, MPFR_RNDN)
         
         // result.real = (ac + bd) / den
-        mpfr_fmma(&result.real.mutableValue,
-                  &lhs.real.storage.value, &rhs.real.storage.value,
-                  &lhs.imaginary.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
-        mpfr_div(&result.real.mutableValue, &result.real.storage.value, &den.storage.value, MPFR_RNDN)
+        mpfr_fmma(result.real.mutablePtr,
+                  lhs.real.storage.ptr, rhs.real.storage.ptr,
+                  lhs.imaginary.storage.ptr, rhs.imaginary.storage.ptr, MPFR_RNDN)
+        mpfr_div(result.real.mutablePtr, result.real.storage.ptr, den.storage.ptr, MPFR_RNDN)
         
         // result.imaginary = (bc - ad) / den
-        mpfr_fmms(&result.imaginary.mutableValue,
-                  &lhs.imaginary.storage.value, &rhs.real.storage.value,
-                  &lhs.real.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
-        mpfr_div(&result.imaginary.mutableValue, &result.imaginary.storage.value, &den.storage.value, MPFR_RNDN)
+        mpfr_fmms(result.imaginary.mutablePtr,
+                  lhs.imaginary.storage.ptr, rhs.real.storage.ptr,
+                  lhs.real.storage.ptr, rhs.imaginary.storage.ptr, MPFR_RNDN)
+        mpfr_div(result.imaginary.mutablePtr, result.imaginary.storage.ptr, den.storage.ptr, MPFR_RNDN)
         
         return result
     }
@@ -362,8 +363,8 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     /// Divides both parts directly (correctly rounded, no reciprocal)
     public static func / (_ lhs: MPComplex, _ rhs: MPFloat) -> MPComplex {
         var result = MPComplex(precision: lhs.precision)
-        mpfr_div(&result.real.mutableValue, &lhs.real.storage.value, &rhs.storage.value, MPFR_RNDN)
-        mpfr_div(&result.imaginary.mutableValue, &lhs.imaginary.storage.value, &rhs.storage.value, MPFR_RNDN)
+        mpfr_div(result.real.mutablePtr, lhs.real.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
+        mpfr_div(result.imaginary.mutablePtr, lhs.imaginary.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
         return result
     }
     
@@ -374,17 +375,17 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         var den = MPFloat(precision: rhs.precision)
 
         // den = c² + d²
-        mpfr_fmma(&den.mutableValue, &rhs.real.storage.value, &rhs.real.storage.value,
-                  &rhs.imaginary.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
+        mpfr_fmma(den.mutablePtr, rhs.real.storage.ptr, rhs.real.storage.ptr,
+                  rhs.imaginary.storage.ptr, rhs.imaginary.storage.ptr, MPFR_RNDN)
 
         // result.real = lhs * c / den
-        mpfr_mul(&result.real.mutableValue, &lhs.storage.value, &rhs.real.storage.value, MPFR_RNDN)
-        mpfr_div(&result.real.mutableValue, &result.real.storage.value, &den.storage.value, MPFR_RNDN)
+        mpfr_mul(result.real.mutablePtr, lhs.storage.ptr, rhs.real.storage.ptr, MPFR_RNDN)
+        mpfr_div(result.real.mutablePtr, result.real.storage.ptr, den.storage.ptr, MPFR_RNDN)
         
         // result.imaginary = -lhs * d / den
-        mpfr_mul(&result.imaginary.mutableValue, &lhs.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
-        mpfr_neg(&result.imaginary.mutableValue, &result.imaginary.storage.value, MPFR_RNDN)
-        mpfr_div(&result.imaginary.mutableValue, &result.imaginary.storage.value, &den.storage.value, MPFR_RNDN)
+        mpfr_mul(result.imaginary.mutablePtr, lhs.storage.ptr, rhs.imaginary.storage.ptr, MPFR_RNDN)
+        mpfr_neg(result.imaginary.mutablePtr, result.imaginary.storage.ptr, MPFR_RNDN)
+        mpfr_div(result.imaginary.mutablePtr, result.imaginary.storage.ptr, den.storage.ptr, MPFR_RNDN)
         
         return result
     }
@@ -396,20 +397,20 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         var re = MPFloat(precision: lhs.precision)
 
         // den = c² + d²
-        mpfr_fmma(&den.mutableValue, &rhs.real.storage.value, &rhs.real.storage.value,
-                  &rhs.imaginary.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
+        mpfr_fmma(den.mutablePtr, rhs.real.storage.ptr, rhs.real.storage.ptr,
+                  rhs.imaginary.storage.ptr, rhs.imaginary.storage.ptr, MPFR_RNDN)
 
         // re = (ac + bd) / den, computed from the original values
-        mpfr_fmma(&re.mutableValue,
-                  &lhs.real.storage.value, &rhs.real.storage.value,
-                  &lhs.imaginary.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
-        mpfr_div(&re.mutableValue, &re.storage.value, &den.storage.value, MPFR_RNDN)
+        mpfr_fmma(re.mutablePtr,
+                  lhs.real.storage.ptr, rhs.real.storage.ptr,
+                  lhs.imaginary.storage.ptr, rhs.imaginary.storage.ptr, MPFR_RNDN)
+        mpfr_div(re.mutablePtr, re.storage.ptr, den.storage.ptr, MPFR_RNDN)
 
         // imaginary = (bc - ad) / den, in place
-        mpfr_fmms(&lhs.imaginary.mutableValue,
-                  &lhs.imaginary.storage.value, &rhs.real.storage.value,
-                  &lhs.real.storage.value, &rhs.imaginary.storage.value, MPFR_RNDN)
-        mpfr_div(&lhs.imaginary.mutableValue, &lhs.imaginary.storage.value, &den.storage.value, MPFR_RNDN)
+        mpfr_fmms(lhs.imaginary.mutablePtr,
+                  lhs.imaginary.storage.ptr, rhs.real.storage.ptr,
+                  lhs.real.storage.ptr, rhs.imaginary.storage.ptr, MPFR_RNDN)
+        mpfr_div(lhs.imaginary.mutablePtr, lhs.imaginary.storage.ptr, den.storage.ptr, MPFR_RNDN)
         
         lhs.real = re
     }
@@ -417,8 +418,8 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     /// Division (in place)
     /// Divides both parts directly (correctly rounded, no reciprocal)
     public static func /= (lhs: inout MPComplex, rhs: MPFloat) {
-        mpfr_div(&lhs.real.mutableValue, &lhs.real.storage.value, &rhs.storage.value, MPFR_RNDN)
-        mpfr_div(&lhs.imaginary.mutableValue, &lhs.imaginary.storage.value, &rhs.storage.value, MPFR_RNDN)
+        mpfr_div(lhs.real.mutablePtr, lhs.real.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
+        mpfr_div(lhs.imaginary.mutablePtr, lhs.imaginary.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
     }
     
     //
@@ -443,13 +444,13 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         var result = MPComplex(precision: value.precision)
 
         // a² - b², single rounding
-        mpfr_fmms(&result.real.mutableValue,
-                  &value.real.storage.value, &value.real.storage.value,
-                  &value.imaginary.storage.value, &value.imaginary.storage.value, MPFR_RNDN)
+        mpfr_fmms(result.real.mutablePtr,
+                  value.real.storage.ptr, value.real.storage.ptr,
+                  value.imaginary.storage.ptr, value.imaginary.storage.ptr, MPFR_RNDN)
         
         // 2ab: multiplication by 2 is an exact exponent shift
-        mpfr_mul(&result.imaginary.mutableValue, &value.real.storage.value, &value.imaginary.storage.value, MPFR_RNDN)
-        mpfr_mul_2ui(&result.imaginary.mutableValue, &result.imaginary.storage.value, 1, MPFR_RNDN)
+        mpfr_mul(result.imaginary.mutablePtr, value.real.storage.ptr, value.imaginary.storage.ptr, MPFR_RNDN)
+        mpfr_mul_2ui(result.imaginary.mutablePtr, result.imaginary.storage.ptr, 1, MPFR_RNDN)
         
         return result
     }
@@ -457,16 +458,16 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     /// Square of Euclidean norm: a² + b², single rounding
     public static func normSquare(_ value: MPComplex) -> MPFloat {
         var result = MPFloat(precision: value.precision)
-        mpfr_fmma(&result.mutableValue,
-                  &value.real.storage.value, &value.real.storage.value,
-                  &value.imaginary.storage.value, &value.imaginary.storage.value, MPFR_RNDN)
+        mpfr_fmma(result.mutablePtr,
+                  value.real.storage.ptr, value.real.storage.ptr,
+                  value.imaginary.storage.ptr, value.imaginary.storage.ptr, MPFR_RNDN)
         return result
     }
     
     /// Absolute value / norm: sqrt(a² + b²), correctly rounded, no intermediate overflow
     public static func abs(_ value: MPComplex) -> MPFloat {
         var result = MPFloat(precision: value.precision)
-        mpfr_hypot(&result.mutableValue, &value.real.storage.value, &value.imaginary.storage.value, MPFR_RNDN)
+        mpfr_hypot(result.mutablePtr, value.real.storage.ptr, value.imaginary.storage.ptr, MPFR_RNDN)
         return result
     }
 

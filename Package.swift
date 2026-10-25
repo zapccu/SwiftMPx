@@ -41,7 +41,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SwiftMPxTests",
-            dependencies: ["SwiftMPx"]
+            dependencies: ["SwiftMPx", "CMPFR"]
         )
     ]
 )

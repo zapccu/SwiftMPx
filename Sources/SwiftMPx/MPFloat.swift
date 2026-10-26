@@ -259,51 +259,58 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     }
     
     /// Calculate required precision for numeric string
+    /// Accepts the same formats as the String initializers (the string is parsed by MPFR):
+    /// "1", "-123.456", "+.5", "5.", "1.23e-5", "1.23E+5", "0.0025e-347", leading and trailing
+    /// whitespace. The exponent range is not limited to Double. Zero ("0", "-0.0", "0e-500") has no
+    /// precision requirement and returns (isDbl: true, bits: 53).
+    /// Returns nil for invalid strings ("abc", "1,5", "e5", "1e"), NaN and infinity.
     /// - Parameters:
     ///   - real:        Base value for precision estimation. Decimal string (i.e. "1.5e-12").
     ///   - scale:       Scaling factor, default = 1 (no scaling)
     ///   - safetyBits:  Additional bits as safety buffer, default = 8
     /// - Returns:       Tuple (isDbl: Bool, precision: Int), nil on error
     public static func getPrecision(real: String, scale: Int = 1, safetyBits: Int = 8) -> Precision? {
-
-        /// Parse exponent of floating point string
-        func parseExponent(_ string: String) -> Int? {
-            let trimmed = string.trimmingCharacters(in: .whitespaces).lowercased()
-            
-            // Try Double parsing
-            if let value = Double(trimmed), value.isFinite, value != 0 {
-                return Int(floor(Foundation.log10(Swift.abs(value))))
-            }
-            
-            // Underflow/Overflow: Extract exponent from string
-            // Format: [±][digits][.digits]e[±]exponent
-            if let eIdx = trimmed.firstIndex(of: "e") {
-                let expString = String(trimmed[trimmed.index(after: eIdx)...])
-                return Int(expString)
-            }
-            
+        // Parse with MPFR: accepts exactly the formats of the String initializers, with unlimited
+        // exponent range (also beyond Double, e.g. "0.0025e-347")
+        let value = Storage(precision: 64)
+        guard mpfr_set_str(value.ptr, trimmedNumber(real), 10, MPFR_RNDN) == 0 else {
             return nil
         }
         
-        let s: Double = Swift.max(Double(scale), 1.0)
-
-        if var e = parseExponent(real) {
-            // Scaled exponent: real / scaling
-            // log10(real / scale) = log10(real) - log10(scale)
-            // log10(1) = 0 => No scaling
-            e -= Int(floor(Foundation.log10(s)))
-            
-            // bits = ceil(-log2(10^exp)) = ceil(-exp * log2(10))
-            // log2_10 = 3.32193
-            let log2_10: Double = Foundation.log2(10.0)
-            let rawBits = Int(ceil(-Double(e) * log2_10))
-            let totalBits = Swift.max(rawBits + safetyBits, 53)
-            let doubleIsSufficient = rawBits <= (53 - safetyBits)
-            
-            return Precision(isDbl: doubleIsSufficient, bits: totalBits)
+        // Zero has no precision requirement
+        if mpfr_zero_p(value.ptr) != 0 {
+            return Precision(isDbl: true, bits: 53)
         }
         
-        return nil
+        // NaN, Inf
+        guard mpfr_number_p(value.ptr) != 0 else { return nil }
+        
+        // Decimal exponent e = floor(log10(|value|)), computed with MPFR (no Double overflow)
+        mpfr_abs(value.ptr, value.ptr, MPFR_RNDN)
+        mpfr_log10(value.ptr, value.ptr, MPFR_RNDN)
+        var e = mpfr_get_si(value.ptr, MPFR_RNDD)
+        
+        // Scaled exponent: real / scaling
+        // log10(real / scale) = log10(real) - log10(scale)
+        // log10(1) = 0 => No scaling
+        let s: Double = Swift.max(Double(scale), 1.0)
+        e -= Int(floor(Foundation.log10(s)))
+        
+        // bits = ceil(-log2(10^exp)) = ceil(-exp * log2(10))
+        let log2_10: Double = Foundation.log2(10.0)
+        let rawBits = Int(ceil(-Double(e) * log2_10))
+        let totalBits = Swift.min(Swift.max(rawBits + safetyBits, 53), maxPrecision)
+        
+        // Double is sufficient if the resolution fits into 53 bits and the value is in Double range
+        let doubleIsSufficient = rawBits <= (53 - safetyBits) && e < 308
+        
+        return Precision(isDbl: doubleIsSufficient, bits: totalBits)
+    }
+    
+    /// Remove leading and trailing whitespace and newlines from a numeric string
+    @inline(__always)
+    internal static func trimmedNumber(_ string: String) -> String {
+        string.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Precision required for a decimal string without loss of digits.
@@ -370,7 +377,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
             ? Self.requiredPrecision(forDecimalString: sval)
             : MPFloat.resolvePrecision(precision)
         storage = Storage(precision: bits)
-        if mpfr_set_str(storage.ptr, sval, 10, MPFR_RNDN) != 0 {
+        if mpfr_set_str(storage.ptr, Self.trimmedNumber(sval), 10, MPFR_RNDN) != 0 {
             mpfr_set_nan(storage.ptr)
         }
     }
@@ -384,7 +391,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
             ? Self.requiredPrecision(forDecimalString: sval)
             : MPFloat.resolvePrecision(precision)
         storage = Storage(precision: bits)
-        if mpfr_set_str(storage.ptr, sval, 10, MPFR_RNDN) != 0 {
+        if mpfr_set_str(storage.ptr, Self.trimmedNumber(sval), 10, MPFR_RNDN) != 0 {
             return nil
         }
     }

@@ -45,6 +45,23 @@ struct ConformanceTests {
         #expect(MPComplex.zero == MPComplex(0.0, 0.0, precision: p))
     }
 
+    @Test func zeroWithPrecision() {
+        let x = MPFloat.zero(precision: 300)
+        #expect(x.isZero)
+        #expect(x.precision == 300)
+
+        let z = MPComplex.zero(precision: 300)
+        #expect(z.real.isZero && z.imaginary.isZero)
+        #expect(z.precision == 300)
+        #expect(z.imaginary.precision == 300)
+
+        // Accumulator keeps its precision with in-place operators
+        var sum = MPFloat.zero(precision: 256)
+        for v in [MPFloat("0.1", precision: 256), MPFloat("0.2", precision: 256)] { sum += v }
+        #expect(sum.precision == 256)
+        #expect(sum == MPFloat("0.3", precision: 256))
+    }
+
     @Test func genericAdditiveArithmetic() {
         func sum<T: AdditiveArithmetic>(_ values: [T]) -> T {
             values.reduce(T.zero, +)

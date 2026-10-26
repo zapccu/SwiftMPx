@@ -13,9 +13,17 @@ import Foundation
 
 extension MPFloat: Hashable, AdditiveArithmetic {
 
-    /// Zero with default precision
+    /// Zero with default precision (required by AdditiveArithmetic)
+    /// Intended for generic code. If the precision is known, use zero(precision:): in-place
+    /// operators keep the precision of the left operand, so `var sum = MPFloat.zero; sum += x`
+    /// rounds every result to the default precision.
     public static var zero: MPFloat {
         MPFloat(0, precision: MPFloat.defaultPrecision)
+    }
+    
+    /// Zero with the specified precision
+    public static func zero(precision: Int) -> MPFloat {
+        MPFloat(0, precision: precision)
     }
 
     /// Hash value, consistent with ==
@@ -34,9 +42,15 @@ extension MPFloat: Hashable, AdditiveArithmetic {
 
 extension MPComplex: Hashable, AdditiveArithmetic {
 
-    /// Zero with default precision
+    /// Zero with default precision (required by AdditiveArithmetic)
+    /// Intended for generic code. If the precision is known, use zero(precision:), see MPFloat.zero.
     public static var zero: MPComplex {
         MPComplex(0.0, 0.0, precision: MPFloat.defaultPrecision)
+    }
+    
+    /// Zero with the specified precision
+    public static func zero(precision: Int) -> MPComplex {
+        MPComplex(0.0, 0.0, precision: precision)
     }
 
     /// Hash value, consistent with ==

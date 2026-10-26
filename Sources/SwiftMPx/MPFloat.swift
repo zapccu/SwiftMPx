@@ -120,7 +120,8 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         storage.ptr.pointee
     }
     
-    /// Result precision mode
+    /// Result precision mode for operators and functions with 2 operands that return a new value.
+    /// Not used by in-place operators (+=, -=, *=, /=): they keep the precision of the left operand.
     public enum ResultPrecision: Int, Sendable {
         case leftOperand
         case rightOperand

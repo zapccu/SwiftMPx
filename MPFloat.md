@@ -12,6 +12,21 @@ Possible options for result precision are:
 - .maxOfOperands: operation result precision is maximum precision of operands
 - .defaultPrecision: operation result precision is the default precision
 
+The result precision mode is used only by operators and functions that return a new value.
+In-place operators (+=, -=, \*=, /=) never use it: they write the result into the left operand
+and keep its precision. Therefore `x += y` and `x = x + y` can have different precisions:
+
+```
+var x = MPFloat(1.0, precision: 64)
+let y = MPFloat(1.0, precision: 256)
+x = x + y      // 256 bit (with .maxOfOperands)
+x += y         // precision of x
+```
+
+`MPFloat.zero` (required by AdditiveArithmetic, intended for generic code) has the default
+precision. If the precision is known, use `MPFloat.zero(precision: p)`. Otherwise an accumulator
+like `var sum = MPFloat.zero; sum += v` is rounded to the default precision in every step.
+
 Default values are:
 * default precision = 53 bit
 - operation result precision = .maxOfOperands

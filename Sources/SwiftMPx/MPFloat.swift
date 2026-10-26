@@ -139,9 +139,6 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     /// always passed explicitly to mpfr_init2.
     private static let _defaultPrecision = Atomic<Int>(53)
 
-    /// Precision bits
-    private var _precision: Int
-
     /// Precision flags
     public static let detectPrecision: Int     = 0
     public static let useOtherPrecision: Int   = -1
@@ -186,17 +183,18 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     }
 
     /// Return precision
+    /// The precision is stored only in the MPFR value (single source of truth).
     public var precision: Int {
-        get { _precision }
+        get { mpfr_get_prec(storage.ptr) }
         set {
-            let bits = MPFloat.resolvePrecision(newValue, other: _precision)
-            guard bits != _precision else { return }
+            let current = precision
+            let bits = MPFloat.resolvePrecision(newValue, other: current)
+            guard bits != current else { return }
             // New storage with requested precision, rounded value. Copies of this value keep the
             // old storage (copy on write). mpfr_prec_round must not be used with custom memory.
             let newStorage = Storage(precision: bits)
             mpfr_set(newStorage.ptr, storage.ptr, MPFR_RNDN)
             storage = newStorage
-            _precision = bits
         }
     }
     
@@ -342,21 +340,21 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     
     /// Initialize value as NaN
     public init(precision: Int = MPFloat.defaultPrecision) {
-        _precision = MPFloat.resolvePrecision(precision)
-        storage = Storage(precision: _precision)
+        storage = Storage(precision: MPFloat.resolvePrecision(precision))
     }
     
-    /// Initialize by assigning a Double value
+    /// Initialize by assigning a Double value (float literal)
+    /// The literal is converted to Double by the compiler first: `let x: MPFloat = 0.1` is the
+    /// binary Double value nearest to 0.1, not decimal 0.1 with full precision. Use
+    /// MPFloat("0.1", precision: p) for decimal values with more than Double precision.
     public init(floatLiteral value: Double) {
-        _precision = MPFloat.defaultPrecision
-        storage = Storage(precision: _precision)
+        storage = Storage(precision: MPFloat.defaultPrecision)
         mpfr_set_d(storage.ptr, value, MPFR_RNDN)
     }
     
-    /// Initialize by assigning an Int value
+    /// Initialize by assigning an Int value (integer literal, exact)
     public init(integerLiteral value: Int) {
-        _precision = MPFloat.defaultPrecision
-        storage = Storage(precision: _precision)
+        storage = Storage(precision: MPFloat.defaultPrecision)
         mpfr_set_si(storage.ptr, value, MPFR_RNDN)
     }
     
@@ -367,13 +365,10 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     ///   - sval: A number as a string
     ///   - precision: Required precision / number of bits.
     public init(_ sval: String, precision: Int = MPFloat.detectPrecision) {
-        if precision == MPFloat.detectPrecision {
-            _precision = Self.requiredPrecision(forDecimalString: sval)
-        }
-        else {
-            _precision = MPFloat.resolvePrecision(precision)
-        }
-        storage = Storage(precision: _precision)
+        let bits = precision == MPFloat.detectPrecision
+            ? Self.requiredPrecision(forDecimalString: sval)
+            : MPFloat.resolvePrecision(precision)
+        storage = Storage(precision: bits)
         if mpfr_set_str(storage.ptr, sval, 10, MPFR_RNDN) != 0 {
             mpfr_set_nan(storage.ptr)
         }
@@ -384,13 +379,10 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     ///   - sval: A number as a string. Also accepts "@NaN@", "@Inf@", "-@Inf@"
     ///   - precision: Required precision / number of bits.
     public init?(validating sval: String, precision: Int = MPFloat.detectPrecision) {
-        if precision == MPFloat.detectPrecision {
-            _precision = Self.requiredPrecision(forDecimalString: sval)
-        }
-        else {
-            _precision = MPFloat.resolvePrecision(precision)
-        }
-        storage = Storage(precision: _precision)
+        let bits = precision == MPFloat.detectPrecision
+            ? Self.requiredPrecision(forDecimalString: sval)
+            : MPFloat.resolvePrecision(precision)
+        storage = Storage(precision: bits)
         if mpfr_set_str(storage.ptr, sval, 10, MPFR_RNDN) != 0 {
             return nil
         }
@@ -398,34 +390,31 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     
     /// Initialize value with a Float
     public init(_ fval: Float, precision: Int = MPFloat.defaultPrecision) {
-        _precision = MPFloat.resolvePrecision(precision)
-        storage = Storage(precision: _precision)
+        storage = Storage(precision: MPFloat.resolvePrecision(precision))
         mpfr_set_flt(storage.ptr, fval, MPFR_RNDN)
     }
     
     /// Initialize value with a Double
     public init(_ dval: Double, precision: Int = MPFloat.defaultPrecision) {
-        _precision = MPFloat.resolvePrecision(precision)
-        storage = Storage(precision: _precision)
+        storage = Storage(precision: MPFloat.resolvePrecision(precision))
         mpfr_set_d(storage.ptr, dval, MPFR_RNDN)
     }
     
     /// Initialize value with an Int (exact for all Int values if precision >= 64)
     public init(_ ival: Int, precision: Int = MPFloat.defaultPrecision) {
-        _precision = MPFloat.resolvePrecision(precision)
-        storage = Storage(precision: _precision)
+        storage = Storage(precision: MPFloat.resolvePrecision(precision))
         mpfr_set_si(storage.ptr, ival, MPFR_RNDN)
     }
     
     /// Initialize value with a MPFloat with optional precision conversion
     public init(_ other: MPFloat, precision: Int = MPFloat.useOtherPrecision) {
-        _precision = MPFloat.resolvePrecision(precision, other: other.precision)
-        if _precision == other.precision {
+        let bits = MPFloat.resolvePrecision(precision, other: other.precision)
+        if bits == other.precision {
             // Same precision: share storage, copy on write
             storage = other.storage
         }
         else {
-            storage = Storage(precision: _precision)
+            storage = Storage(precision: bits)
             mpfr_set(storage.ptr, other.storage.ptr, MPFR_RNDN)
         }
     }
@@ -896,8 +885,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         return result
     }
     
-    /// Logarithm of (1 + x). For very small x
-    /// As we are calculating with arbitrary precision, we can simply use log(x)
+    /// Logarithm of (1 + x), accurate also for very small x (no cancellation in 1 + x)
     public static func log(onePlus x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
         mpfr_log1p(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
@@ -1062,7 +1050,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     // Gamma functions
     //
     
-    /// Gamma correction
+    /// Gamma function
     public static func gamma(_ x: MPFloat) -> MPFloat {
         let result = MPFloat(precision: x.precision)
         mpfr_gamma(result.storage.ptr, x.storage.ptr, MPFR_RNDN)
@@ -1099,7 +1087,9 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
         return a + (b - a) * t
     }
     
-    /// Exact linear interpolation
+    /// Linear interpolation (1 - t)·a + t·b
+    /// Returns exactly b for t = 1 (lerp returns exactly a for t = 0, but not b for t = 1).
+    /// Both variants round several times, none of them is exact for all t.
     /// - Parameters:
     ///   - a: Start / lower value
     ///   - b: End / upper value

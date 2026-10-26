@@ -97,11 +97,11 @@ struct GetPrecisionTests {
     @Test func complexWithZeroPart() {
         // Previously nil, because "0" was not accepted
         let r = MPComplex.getPrecision(real: "1e-30", imaginary: "0")
-        #expect(r?.bits == MPFloat.getPrecision(real: "1e-30")?.bits)
+        #expect(r?.precision == MPFloat.getPrecision(real: "1e-30")?.bits)
         #expect(r?.isDbl == false)
 
         let z = MPComplex.getPrecision(real: "0", imaginary: "0")
-        #expect(z?.bits == 53)
+        #expect(z?.precision == 53)
         #expect(z?.isDbl == true)
     }
 

@@ -268,7 +268,7 @@ public struct MPFloat: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, C
     ///   - real:        Base value for precision estimation. Decimal string (i.e. "1.5e-12").
     ///   - scale:       Scaling factor, default = 1 (no scaling)
     ///   - safetyBits:  Additional bits as safety buffer, default = 8
-    /// - Returns:       Tuple (isDbl: Bool, precision: Int), nil on error
+    /// - Returns:       Precision (isDbl, bits), nil on error
     public static func getPrecision(real: String, scale: Int = 1, safetyBits: Int = 8) -> Precision? {
         // Parse with MPFR: accepts exactly the formats of the String initializers, with unlimited
         // exponent range (also beyond Double, e.g. "0.0025e-347")

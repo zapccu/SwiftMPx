@@ -102,12 +102,12 @@ struct APIPrecisionTests {
     @Test func complexGetPrecisionUsesLargerRequirement() {
         let r = MPComplex.getPrecision(real: "1e-5", imaginary: "1e-40")
         let im = MPFloat.getPrecision(real: "1e-40")
-        #expect(r?.precision == im?.bits)
+        #expect(r?.bits == im?.bits)
         #expect(r?.isDbl == false)
 
         let d = MPComplex.getPrecision(real: "0.5", imaginary: "0.25")
         #expect(d?.isDbl == true)
-        #expect(d?.precision == 53)
+        #expect(d?.bits == 53)
 
         #expect(MPComplex.getPrecision(real: "abc", imaginary: "1") == nil)
     }

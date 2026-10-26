@@ -38,13 +38,13 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     ///   - scaleReal:      Scaling factor for real part, default = 1 (no scaling)
     ///   - scaleImaginary: Scaling factor for imaginary part, default = 1 (no scaling)
     ///   - safetyBits:     Additional bits as safety buffer (default = 8).
-    /// - Returns:          Tuple (isDbl: Bool, precision: Int), nil on error
+    /// - Returns:          MPFloat.Precision (isDbl, bits), nil on error
     public static func getPrecision(real: String, imaginary: String, scaleReal: Int = 1, scaleImaginary: Int = 1,
-                                    safetyBits: Int = 8) -> (isDbl: Bool, precision: Int)? {
+                                    safetyBits: Int = 8) -> MPFloat.Precision? {
         guard let re = MPFloat.getPrecision(real: real, scale: scaleReal, safetyBits: safetyBits),
               let im = MPFloat.getPrecision(real: imaginary, scale: scaleImaginary, safetyBits: safetyBits)
         else { return nil }
-        return (re.isDbl && im.isDbl, Swift.max(re.bits, im.bits))
+        return MPFloat.Precision(isDbl: re.isDbl && im.isDbl, bits: Swift.max(re.bits, im.bits))
     }
 
     //
@@ -107,7 +107,7 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         case MPFloat.detectPrecision:
             // Magnitude based estimation as lower bound, plus number of significant digits of
             // both parts, so that long mantissas are not truncated
-            let magnitudeBits = getPrecision(real: real, imaginary: imaginary)?.precision ?? MPFloat.defaultPrecision
+            let magnitudeBits = getPrecision(real: real, imaginary: imaginary)?.bits ?? MPFloat.defaultPrecision
             return Swift.max(magnitudeBits,
                              MPFloat.requiredPrecision(forDecimalString: real),
                              MPFloat.requiredPrecision(forDecimalString: imaginary))

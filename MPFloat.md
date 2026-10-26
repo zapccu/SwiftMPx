@@ -133,8 +133,16 @@ MPFloat *CompOperator* { MPFloat | Double | Int }
 
 ## Functions
 ### Precision handling
-#### MPFloat.getPrecision(real: String, scale: Int = 1, safetyBits: Int = 8) -> (isDbl: Bool, precision: Int)?
-Returns a tuple (isDbl, precision). If isDbl is true, MPFR is not needed and one can use Swifts Double type for calculation.
+#### MPFloat.getPrecision(real: String, scale: Int = 1, safetyBits: Int = 8) -> MPFloat.Precision?
+Returns the precision required to resolve the magnitude of the value (divided by scale) as
+`MPFloat.Precision(isDbl: Bool, bits: Int)`. If isDbl is true, MPFR is not needed and one can use
+Swift's Double type for calculation. The string is parsed by MPFR and accepts the same formats as
+the String initializers ("1", "-123.456", "1.23e-5", "0.0025e-347", whitespace). Zero returns
+(isDbl: true, bits: 53). Returns nil for invalid strings, NaN and infinity.
+
+#### MPComplex.getPrecision(real: String, imaginary: String, scaleReal: Int = 1, scaleImaginary: Int = 1, safetyBits: Int = 8) -> MPFloat.Precision?
+Same for both parts of a complex value. The part with the higher requirement determines bits,
+isDbl is true only if Double is sufficient for both parts.
 
 ### Conversions
 ```

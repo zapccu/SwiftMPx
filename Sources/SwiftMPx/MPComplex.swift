@@ -29,55 +29,22 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
             
     /// Calculate required precision
     ///
+    /// Applies MPFloat.getPrecision to both parts. The part with the higher requirement (smaller
+    /// scaled exponent) determines the result.
+    ///
     /// - Parameters:
-    ///   - real:        Base value for precision estimation. Decimal string (i.e. "1.5e-12").
-    ///   - imaginary:   Base value for precision estimation. Decimal string (i.e. "1.5e-12").
-    ///   - safetyBits:  Additional bits as safety buffer (default = 8).
-    /// - Returns:       Tuple (isDbl: Bool, precision: Int, isError: Bool)
+    ///   - real:           Base value for precision estimation. Decimal string (i.e. "1.5e-12").
+    ///   - imaginary:      Base value for precision estimation. Decimal string (i.e. "1.5e-12").
+    ///   - scaleReal:      Scaling factor for real part, default = 1 (no scaling)
+    ///   - scaleImaginary: Scaling factor for imaginary part, default = 1 (no scaling)
+    ///   - safetyBits:     Additional bits as safety buffer (default = 8).
+    /// - Returns:          MPFloat.Precision (isDbl, bits), nil on error
     public static func getPrecision(real: String, imaginary: String, scaleReal: Int = 1, scaleImaginary: Int = 1,
-                                    safetyBits: Int = 8) -> (isDbl: Bool, precision: Int)? {
-
-        /// Parse exponent of floating point string
-        func parseExponent(_ string: String) -> Int? {
-            let trimmed = string.trimmingCharacters(in: .whitespaces).lowercased()
-            
-            // Try Double parsing
-            if let value = Double(trimmed), value.isFinite, value != 0 {
-                return Int(floor(log10(Swift.abs(value))))
-            }
-            
-            // Underflow/Overflow: Extract exponent from string
-            // Format: [±][digits][.digits]e[±]exponent
-            if let eIdx = trimmed.firstIndex(of: "e") {
-                let expString = String(trimmed[trimmed.index(after: eIdx)...])
-                return Int(expString)
-            }
-            
-            return nil
-        }
-        
-        // Parse exponents
-        let realExp = parseExponent(real)
-        let imagExp = parseExponent(imaginary)
-        guard var re = realExp, var ie = imagExp else { return nil }
-
-        // Scaled exponent: size / scaling
-        // log10(real / scaleReal) = log10(real) - log10(scaleReal)
-        // log10(imaginary / scaleImaginary) = log10(imaginary) - log10(scaleImaginary)
-        // log10(1) = 0 => No scaling
-        // Scaling factors < 1 are ignored (log10(0) = -inf would trap when converted to Int)
-        re -= Int(floor(log10(Swift.max(Double(scaleReal), 1.0))))
-        ie -= Int(floor(log10(Swift.max(Double(scaleImaginary), 1.0))))
-
-        let smallestExp = Swift.min(re, ie)  // negativster Exponent = kleinste Ausdehnung
-
-        // bits = ceil(-log2(10^exp)) = ceil(-exp * log2(10))
-        let log2_10 = log2(10.0)
-        let rawBits = Int(ceil(-Double(smallestExp) * log2_10))
-        let totalBits = Swift.max(rawBits + safetyBits, 53)
-        let doubleIsSufficient = rawBits <= (53 - safetyBits)
-            
-        return (doubleIsSufficient, totalBits)
+                                    safetyBits: Int = 8) -> MPFloat.Precision? {
+        guard let re = MPFloat.getPrecision(real: real, scale: scaleReal, safetyBits: safetyBits),
+              let im = MPFloat.getPrecision(real: imaginary, scale: scaleImaginary, safetyBits: safetyBits)
+        else { return nil }
+        return MPFloat.Precision(isDbl: re.isDbl && im.isDbl, bits: Swift.max(re.bits, im.bits))
     }
 
     //
@@ -90,7 +57,8 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         self.imaginary = MPFloat(precision: precision)
     }
     
-    /// Initialize MPComplex with Double literal
+    /// Initialize MPComplex with Double literal (real part, imaginary part = 0)
+    /// The literal is converted to Double first, see MPFloat.init(floatLiteral:)
     public init(floatLiteral value: Double) {
         self.real      = MPFloat(value)
         self.imaginary = MPFloat(0.0)
@@ -111,28 +79,42 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     /// Initialize MPComplex with String values
     /// If one of the Strings is not a number, the resulting value is (NaN, NaN)
     public init(_ real: String, _ imaginary: String = "0", precision: Int = MPFloat.detectPrecision) {
-        var p: Int
-        if precision == MPFloat.detectPrecision {
-            // Magnitude based estimation (previous behaviour) as lower bound, plus number of
-            // significant digits of both parts, so that long mantissas are not truncated
-            let magnitudeBits = Self.getPrecision(real: real, imaginary: imaginary)?.precision ?? MPFloat.defaultPrecision
-            p = Swift.max(magnitudeBits,
-                          MPFloat.requiredPrecision(forDecimalString: real),
-                          MPFloat.requiredPrecision(forDecimalString: imaginary))
-        }
-        else if precision == MPFloat.useDefaultPrecision || precision == MPFloat.useOtherPrecision {
-            p = MPFloat.defaultPrecision
-        }
-        else {
-            p = precision
-        }
-        
+        let p = Self.stringPrecision(forReal: real, imaginary: imaginary, requested: precision)
         self.real      = MPFloat(real, precision: p)
         self.imaginary = MPFloat(imaginary, precision: p)
         
         if self.real.isNaN || self.imaginary.isNaN {
-            self.real = MPFloat.nan
-            self.imaginary = MPFloat.nan
+            // NaN with the requested precision
+            self.real      = MPFloat(precision: p)
+            self.imaginary = MPFloat(precision: p)
+        }
+    }
+    
+    /// Initialize MPComplex with String values. Returns nil if one of the strings is not a valid number.
+    public init?(validatingReal real: String, validatingImaginary imaginary: String = "0",
+                 precision: Int = MPFloat.detectPrecision) {
+        let p = Self.stringPrecision(forReal: real, imaginary: imaginary, requested: precision)
+        guard let re = MPFloat(validating: real, precision: p),
+              let im = MPFloat(validating: imaginary, precision: p)
+        else { return nil }
+        self.real      = re
+        self.imaginary = im
+    }
+    
+    /// Precision for the String initializers
+    private static func stringPrecision(forReal real: String, imaginary: String, requested: Int) -> Int {
+        switch requested {
+        case MPFloat.detectPrecision:
+            // Magnitude based estimation as lower bound, plus number of significant digits of
+            // both parts, so that long mantissas are not truncated
+            let magnitudeBits = getPrecision(real: real, imaginary: imaginary)?.bits ?? MPFloat.defaultPrecision
+            return Swift.max(magnitudeBits,
+                             MPFloat.requiredPrecision(forDecimalString: real),
+                             MPFloat.requiredPrecision(forDecimalString: imaginary))
+        case MPFloat.useDefaultPrecision, MPFloat.useOtherPrecision:
+            return MPFloat.defaultPrecision
+        default:
+            return requested
         }
     }
     
@@ -288,7 +270,7 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     /// (a + bi)(c + di) = (ac - bd) + (ad + bc)i
     /// mpfr_fmms / mpfr_fmma compute both parts with a single rounding and without temporaries.
     public static func * (_ lhs: MPComplex, _ rhs: MPComplex) -> MPComplex {
-        var result = MPComplex(precision: lhs.precision)
+        var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
         mpfr_fmms(result.real.mutablePtr,
                   lhs.real.storage.ptr, rhs.real.storage.ptr,
                   lhs.imaginary.storage.ptr, rhs.imaginary.storage.ptr, MPFR_RNDN)
@@ -308,7 +290,7 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     
     /// Multiplication (MPFloat, MPComplex), return new value
     public static func * (_ lhs: MPFloat, _ rhs: MPComplex) -> MPComplex {
-        var result = MPComplex(precision: rhs.precision)
+        var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
         mpfr_mul(result.real.mutablePtr, lhs.storage.ptr, rhs.real.storage.ptr, MPFR_RNDN)
         mpfr_mul(result.imaginary.mutablePtr, lhs.storage.ptr, rhs.imaginary.storage.ptr, MPFR_RNDN)
         return result
@@ -367,7 +349,7 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     /// Division: MPComplex, MPFloat
     /// Divides both parts directly (correctly rounded, no reciprocal)
     public static func / (_ lhs: MPComplex, _ rhs: MPFloat) -> MPComplex {
-        var result = MPComplex(precision: lhs.precision)
+        var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
         mpfr_div(result.real.mutablePtr, lhs.real.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
         mpfr_div(result.imaginary.mutablePtr, lhs.imaginary.storage.ptr, rhs.storage.ptr, MPFR_RNDN)
         return result
@@ -376,8 +358,8 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
     /// Division: MPFloat, MPComplex
     /// lhs / (c + di) = lhs * (c - di) / (c² + d²)
     public static func / (_ lhs: MPFloat, _ rhs: MPComplex) -> MPComplex {
-        var result = MPComplex(precision: rhs.precision)
-        var den = MPFloat(precision: rhs.precision)
+        var result = MPComplex(precision: MPFloat.rp(lhs.precision, rhs.precision))
+        var den = MPFloat(precision: result.precision)
 
         // den = c² + d²
         mpfr_fmma(den.mutablePtr, rhs.real.storage.ptr, rhs.real.storage.ptr,

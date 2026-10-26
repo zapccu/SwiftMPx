@@ -5,6 +5,13 @@
 
 MPComplex is using the precision rules and function from MPFloat.
 
+* Operators returning a new value (+, -, *, /) use the result precision mode of MPFloat
+  (see MPFloat.setPrecisions), also for mixed operations with MPFloat.
+* In-place operators (+=, -=, *=, /=) do not use the result precision mode: they keep the
+  precision of the left operand (see MPFloat.md).
+* `MPComplex.zero` has the default precision, `MPComplex.zero(precision: p)` the specified one.
+* Functions with one argument (square, normSquare, abs, arg) use the precision of the argument.
+
 ## Initializers
 
 ```

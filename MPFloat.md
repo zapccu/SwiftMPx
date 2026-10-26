@@ -12,6 +12,21 @@ Possible options for result precision are:
 - .maxOfOperands: operation result precision is maximum precision of operands
 - .defaultPrecision: operation result precision is the default precision
 
+The result precision mode is used only by operators and functions that return a new value.
+In-place operators (+=, -=, \*=, /=) never use it: they write the result into the left operand
+and keep its precision. Therefore `x += y` and `x = x + y` can have different precisions:
+
+```
+var x = MPFloat(1.0, precision: 64)
+let y = MPFloat(1.0, precision: 256)
+x = x + y      // 256 bit (with .maxOfOperands)
+x += y         // precision of x
+```
+
+`MPFloat.zero` (required by AdditiveArithmetic, intended for generic code) has the default
+precision. If the precision is known, use `MPFloat.zero(precision: p)`. Otherwise an accumulator
+like `var sum = MPFloat.zero; sum += v` is rounded to the default precision in every step.
+
 Default values are:
 * default precision = 53 bit
 - operation result precision = .maxOfOperands
@@ -118,8 +133,16 @@ MPFloat *CompOperator* { MPFloat | Double | Int }
 
 ## Functions
 ### Precision handling
-#### MPFloat.getPrecision(real: String, scale: Int = 1, safetyBits: Int = 8) -> (isDbl: Bool, precision: Int)?
-Returns a tuple (isDbl, precision). If isDbl is true, MPFR is not needed and one can use Swifts Double type for calculation.
+#### MPFloat.getPrecision(real: String, scale: Int = 1, safetyBits: Int = 8) -> MPFloat.Precision?
+Returns the precision required to resolve the magnitude of the value (divided by scale) as
+`MPFloat.Precision(isDbl: Bool, bits: Int)`. If isDbl is true, MPFR is not needed and one can use
+Swift's Double type for calculation. The string is parsed by MPFR and accepts the same formats as
+the String initializers ("1", "-123.456", "1.23e-5", "0.0025e-347", whitespace). Zero returns
+(isDbl: true, bits: 53). Returns nil for invalid strings, NaN and infinity.
+
+#### MPComplex.getPrecision(real: String, imaginary: String, scaleReal: Int = 1, scaleImaginary: Int = 1, safetyBits: Int = 8) -> MPFloat.Precision?
+Same for both parts of a complex value. The part with the higher requirement determines bits,
+isDbl is true only if Double is sufficient for both parts.
 
 ### Conversions
 ```

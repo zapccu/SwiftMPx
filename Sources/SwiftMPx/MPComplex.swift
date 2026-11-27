@@ -185,6 +185,11 @@ public struct MPComplex : ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral
         self.real.isNaN || self.imaginary.isNaN
     }
     
+    /// Return true if value is zero
+    public var isZero: Bool {
+        return real.isZero && imaginary.isZero
+    }
+    
     /// Negate MPComplex
     public static prefix func - (rhs: MPComplex) -> MPComplex {
         var result = rhs
